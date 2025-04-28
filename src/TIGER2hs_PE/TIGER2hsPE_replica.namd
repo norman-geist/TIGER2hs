@@ -708,12 +708,35 @@ if {[info exists tigerconheat] && $tigerconheat} {
     set conheat 1
 }
 
-#enable swarming extension?
+###### ENABLE SWARMING EXTENSION? ###################################
 set swarming 0
 if {[info exists swarmcycle] && $swarmcycle > 0} {
     puts "Info: TIGER2hsPE - ENABLED SWARMING MODIFICATION"
     set swarming 1
+
+    #Set up structure pool?
+    if {$swarmpoolsize > 0} {
+        set pool_output_root [format "$output_root/pool" ""]
+        if {![file exists $pool_output_root]} {
+            file mkdir $pool_output_root
+            puts "Info: SWARM - SETTING UP STRUCTURE POOL"
+        } else {
+            puts "Warn: SWARM - USING EXISTING STRUCTURE POOL - BE CAUTIOUS"
+        }
+    }
+    
+    #initialize counters
+    if {![info exists seed_accepted]} {#restart
+        set seed_accepted 0
+        set seed_attempted 0
+        set seed_progress 1
+        set seed_successful 0
+        array set seed_scores {}
+    } else {
+        set seed_progress [expr 1.0*$seed_successful/$seed_accepted]
+    }
 }
+#####################################################################
 
 #multiexchange?
 puts "Info: TIGER2hsPE - PAIR-WISE GLOBAL RANDOM EXCHANGE"
@@ -752,7 +775,6 @@ while {$i_run < $num_runs} {
     
     #compute noiseless potential energy through OpenMM
     #write coordinates to pdb
-    output [format "$output_root.offer.$replica_id" ""]
     set boxvec [readxsc [format "$output_root.offer.$replica_id.xsc" ""]]
     
     #create shell pdb and crd
@@ -900,12 +922,52 @@ while {$i_run < $num_runs} {
     puts "Info: TIGER2hsPE - COMPLETED RUN $i_run IN $tcycle SHELLSEARCH TOOK $tshell OpenMM TOOK $topenmm"
     incr i_run
     
+    ################################ SWARM CYCLE ###############################
+    if {$swarming} {
+    
+        #Replicas have already saved their current states for TIGER2h, we reuse them here
+        
+        #is a swarmcycle due?
+        if {[expr $i_run % $swarmcycle] == 0 && $i_run >= $swarmcycle} {
+        
+            incr seed_attempted
+            
+            #Do we seed now?
+            if {$r == 0} {
+                #dynamic or static cycle strategy
+                if {$swarmdynamic} {
+                    set swarming_do [expr $seed_progress > rand() ? 1 : 0]
+                } else {
+                    set swarming_do 1
+                }
+                
+                #distribute if we swarm or not    
+                for {set k 1} {$k < $swarmseedreps} {incr k} {
+                    replicaSend $seed_do $k
+                }
+            } else {
+                set seed_do [replicaRecv 0]
+            }
+        
+        if {$seed_do} {
+            incr seed_accepted
+            puts "Info: SWARM - CYCLE $seed_accepted"
+
+            #Collect COLVAR scores
+            
+            #Decide if we have a new best scoring structure
+            
+            #Seeding randomly chosen replicas
+            
+            #Pool exchange for randomly chosed replicas
+        }
+    ############################################################################
+    
     #write restart information
     if { $i_run % $runs_per_restart == 0 ||
         $i_run == $num_runs } {  # restart
         puts "Info: TIGER2hsPE - WRITING RESTART INFORMATION AT RUN $i_run"
         set restart_root "$job_output_root.restart$i_run"
-        output [format $restart_root.$replica_id $replica_id]
         set rfile [open [format "$restart_root.$replica_id.tcl" $replica_id] "w"]
         puts $rfile [list array set replica [array get replica]]
         close $rfile
@@ -916,6 +978,12 @@ while {$i_run < $num_runs} {
             puts $rfile [list set i_run $i_run]
             puts $rfile [list set i_step $i_step]
             puts $rfile [list set restart_root $restart_root]
+            
+            #SWARMIN restart information
+            if {$seref} {
+                puts "WARNING TO DO"
+            }
+            
             close $rfile
             if [info exists old_restart_root] {
                 set oldroot [format $old_restart_root ""]
