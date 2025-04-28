@@ -1,14 +1,14 @@
 # Supplementary information:
 #
-# Article:     Fundamental redesign of the TIGER2hs kernel to address severe parameter sensitivity
-# Authors:     Lukas Schulig, Norman Geist, Mihaela Delcea, Andreas Link, Martin Kulke
+# Article:     
+# Authors:     Lukas Schulig, Norman Geist, Mihaela Delcea, Andreas Link
 # Institution: Institute of Pharmacy, University of Greifswald, Friedrich-Ludwig-Jahn-Str. 17, 17489 Greifswald
 #              Institute of Biochemistry, University of Greifswald, Felix-Hausdorff-Straße 4, 17487 Greifswald, Germany
-# Journal:     Journal of Chemical Information and Modelling
+# Journal:     
 #
-# -- TIGER2hs-PE (pair exchange version)--
+# -- TIGER2hs-PE (pair exchange version) + swarming --
 #
-# Implementation of the hybrid solvent TIGER2hsPE with OpenMM interface
+# Implementation of the hybrid solvent TIGER2hsPE with OpenMM interface and swarming extension
 # for the NAMD - NAnoscale Molecular Dynamics program[1]. The implementation is majorly the original REMD script
 # shipped with the NAMD-2.11 source code (replica.namd). Works with multi-copy enabled NAMD builds of versions
 # 2.11 and above.
@@ -39,6 +39,8 @@
 #           a xsc file to OpenMM.
 #           The "sortreplicas" tools is no longer required. All resulting trajectory DCD files
 #           can just be concatenated, they all build the baseline ensemble.
+#
+#           Swarming extension: bla bla
 
 after 5000 replicaBarrier; #prevents segfaulting if parallel startup is really unsynchronous
 
@@ -704,6 +706,13 @@ set conheat 0
 if {[info exists tigerconheat] && $tigerconheat} {
     puts "Info: TIGER2hsPE - ENABLED CONTINUOUS HEATING MODIFICATION"
     set conheat 1
+}
+
+#enable swarming extension?
+set swarming 0
+if {[info exists swarmcycle] && $swarmcycle > 0} {
+    puts "Info: TIGER2hsPE - ENABLED SWARMING MODIFICATION"
+    set swarming 1
 }
 
 #multiexchange?
