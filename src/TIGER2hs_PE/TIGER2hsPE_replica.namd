@@ -987,7 +987,7 @@ while {$i_run < $num_runs} {
             incr seed_attempted
             
             #Do we seed now?
-            if {$r == 0} {
+            if {$replica_id == 0} {
                 #dynamic or static cycle strategy
                 if {$swarmdynamic} {
                     set swarming_do [expr $seed_progress > rand() ? 1 : 0]
