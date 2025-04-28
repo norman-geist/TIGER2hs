@@ -113,6 +113,24 @@ proc getE {log} {
     return $e
 }
 
+proc colvar_RandOn {} {
+    global  colvar_config_file_rand
+
+    cv reset
+    cv configfile $colvar_config_file_rand
+        
+    puts "Info: TIGER2hs - Loaded randomization colvars"
+}
+
+proc colvar_RandOff {} {
+    global  colvar_config_file
+
+    cv reset
+    cv configfile $colvar_config_file
+        
+    puts "Info: TIGER2hs - Loaded sampling colvars"
+}
+
 proc timer_read {} {
     set clocksource "/proc/uptime"
     if {[file exists $clocksource]} {
@@ -646,8 +664,8 @@ binaryoutput    no
 firsttimestep   $i_step
 outputEnergies  [expr $incr_step/100]
 outputTiming    [expr $incr_step/10]
-seed 	   	  [expr int(0*srand(int(100000*rand()) + 100*$replica_id) + 100000*rand())]
-outputname 	  [format $job_output_root.$replica_id $replica_id]
+seed 	   	    [expr int(0*srand(int(100000*rand()) + 100*$replica_id) + 100000*rand())]
+outputname 	    [format $job_output_root.$replica_id $replica_id]
 
 if {$i_run} { #restart
     coordinates $restart_root.$replica_id.coor
@@ -659,6 +677,10 @@ if {$i_run} { #restart
 }
 
 source $namd_config_file
+
+#enable colvars
+colvars         on
+colvarsConfig   $colvar_config_file
 #####################################################
 
 ### INITIALIZE ON DEMAND FRAME OUTPUT ###
@@ -701,6 +723,23 @@ if {[info exists minruns]} {
 }
 ######################################
 
+### PERFORM INITIAL RANDOMIZATION ###
+if {[info exists randruns]} {
+    if {$randruns > 0 && $i_run == 0} {
+        puts "Info: TIGER2hs2 - PERFORMING RANDOMIZATION"
+        if {$remdpressure} {
+            langevinpistontarget [expr 3*0.00133*pow(10,8.14019-(1810.94/(244.485+($rand_temp-273.15))))]
+        }
+        langevintemp $rand_temp
+        langevinpistontemp $rand_temp
+        colvar_RandOn
+        run [expr $incr_step*$randruns]
+        colvar_RandOff
+        firsttimestep 0
+    }
+}
+######################################
+
 #enable continuous heating modification
 set conheat 0
 if {[info exists tigerconheat] && $tigerconheat} {
@@ -713,6 +752,20 @@ set swarming 0
 if {[info exists swarmcycle] && $swarmcycle > 0} {
     puts "Info: TIGER2hsPE - ENABLED SWARMING MODIFICATION"
     set swarming 1
+    
+    #Sanity checks
+    if {[expr $swarmseedreps+$swarmpoolreps] < 1} {
+      error "need at least one seed or pool replica to do anything"
+    }
+    if {$swarmdynamic} {
+        puts "Info: SWARM - Using dynamic cycle lengths based on seeding progress"
+    } else {
+        puts "Info: SWARM - Using static cycle lengths"
+    }
+    if {$swarmpoolsize > 0 && $swarmpoolreps < 1} {
+        puts "Warn: SWARM - Disabling structure pool due to zero pool replicas"
+        set swarmpoolsize 0
+    }
 
     #Set up structure pool?
     if {$swarmpoolsize > 0} {
@@ -775,6 +828,7 @@ while {$i_run < $num_runs} {
     
     #compute noiseless potential energy through OpenMM
     #write coordinates to pdb
+    output [format "$output_root.offer.$replica_id" ""]
     set boxvec [readxsc [format "$output_root.offer.$replica_id.xsc" ""]]
     
     #create shell pdb and crd
@@ -948,12 +1002,16 @@ while {$i_run < $num_runs} {
             } else {
                 set seed_do [replicaRecv 0]
             }
+        }
         
+        #Perform swarming cycle
         if {$seed_do} {
             incr seed_accepted
             puts "Info: SWARM - CYCLE $seed_accepted"
 
             #Collect COLVAR scores
+            set score [cv colvar $swarmcolvar value]
+            puts "MY SCORE IS $score"
             
             #Decide if we have a new best scoring structure
             
@@ -961,6 +1019,7 @@ while {$i_run < $num_runs} {
             
             #Pool exchange for randomly chosed replicas
         }
+    }
     ############################################################################
     
     #write restart information
