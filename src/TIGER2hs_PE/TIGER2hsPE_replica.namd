@@ -655,12 +655,12 @@ namespace eval SArray {
     }
 
     # Sort entries by "key" or "value"
-    proc sort {name by} {
+    proc sort {name by flags} {
         upvar ::SArray::${name}::entries e
         if {$by eq "key"} {
-            set e [lsort -index 0 $e]
+            set e [eval lsort -index 0 $flags \$e]
         } elseif {$by eq "value"} {
-            set e [lsort -index 1 $e]
+            set e [eval lsort -index 1 $flags \$e]
         } else {
             error "Invalid sort criteria: must be 'key' or 'value'"
         }
@@ -732,6 +732,11 @@ namespace eval SArray {
     proc export {name} {
         upvar ::SArray::${name}::entries e
         return $e
+    }
+    
+    proc count {name} {
+        upvar ::SArray::${name}::entries e
+        return [llength $e]
     }
 
     # Import entries
@@ -1153,7 +1158,7 @@ while {$i_run < $num_runs} {
                     puts stderr "SEED_OFFER $seed_accepted $i $tmp_score"
                     SArray::add scores $i $tmp_score
                 }
-                SArray::sort scores "value"
+                SArray::sort scores "value" "-real"
                 set tmp_best [SArray::first scores]
 
                 #Decide if we have a new best scoring structure (or first cycle)
