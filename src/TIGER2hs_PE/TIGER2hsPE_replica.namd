@@ -1242,6 +1242,7 @@ while {$i_run < $num_runs} {
         $i_run == $num_runs } {  # restart
         puts "Info: TIGER2hsPE - WRITING RESTART INFORMATION AT RUN $i_run"
         set restart_root "$job_output_root.restart$i_run"
+        output [format $restart_root.$replica_id $replica_id]
         set rfile [open [format "$restart_root.$replica_id.tcl" $replica_id] "w"]
         puts $rfile [list array set replica [array get replica]]
         close $rfile
@@ -1257,10 +1258,9 @@ while {$i_run < $num_runs} {
             if {$swarming} {
                 puts $rfile [list set seed_accepted $seed_accepted]
                 puts $rfile [list set seed_attempted $seed_attempted]
-                puts $rfile [list set seed_prob $seed_prob]
                 puts $rfile [list set seed_successful $seed_successful]
                 puts $rfile [list set seed_best $seed_best]
-                #WHAT ABOUT THE POOL
+                #WHAT ABOUT THE POOL BOOK KEEPING
             }
             
             close $rfile
