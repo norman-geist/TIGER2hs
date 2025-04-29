@@ -614,6 +614,139 @@ proc filterPDB {inpdb outpdb solutesel solventsel ignoresel dspace boxvec maxsol
     puts "Info: TIGER2hsPE - DONE CREATING SHELL PDB $outpdb WITH $maxsol SOLVENTS"
     #---------------------------------------------------------------------------------------------------------------
 }
+
+#Sortable associative arrays in TCL8.5 based on lists
+namespace eval SArray {
+    # Create a new instance
+    proc new {name} {
+        namespace eval ::SArray::${name} {
+            variable entries
+            set entries {}
+        }
+    }
+
+    # Add or replace an entry
+    proc add {name key value} {
+        upvar ::SArray::${name}::entries e
+        set found 0
+        for {set i 0} {$i < [llength $e]} {incr i} {
+            set pair [lindex $e $i]
+            if {[lindex $pair 0] eq $key} {
+                set e [lreplace $e $i $i [list $key $value]]
+                set found 1
+                break
+            }
+        }
+        if {!$found} {
+            lappend e [list $key $value]
+        }
+    }
+
+    # Remove an entry
+    proc remove {name key} {
+        upvar ::SArray::${name}::entries e
+        set newlist {}
+        foreach pair $e {
+            if {[lindex $pair 0] ne $key} {
+                lappend newlist $pair
+            }
+        }
+        set e $newlist
+    }
+
+    # Sort entries by "key" or "value"
+    proc sort {name by} {
+        upvar ::SArray::${name}::entries e
+        if {$by eq "key"} {
+            set e [lsort -index 0 $e]
+        } elseif {$by eq "value"} {
+            set e [lsort -index 1 $e]
+        } else {
+            error "Invalid sort criteria: must be 'key' or 'value'"
+        }
+    }
+
+    # Get first entry
+    proc first {name} {
+        upvar ::SArray::${name}::entries e
+        if {[llength $e] > 0} {
+            return [lindex $e 0]
+        } else {
+            return ""
+        }
+    }
+
+    # Get last entry
+    proc last {name} {
+        upvar ::SArray::${name}::entries e
+        if {[llength $e] > 0} {
+            return [lindex $e end]
+        } else {
+            return ""
+        }
+    }
+
+    # Get list of keys
+    proc keys {name} {
+        upvar ::SArray::${name}::entries e
+        set klist {}
+        foreach pair $e {
+            lappend klist [lindex $pair 0]
+        }
+        return $klist
+    }
+
+    # Get list of values
+    proc values {name} {
+        upvar ::SArray::${name}::entries e
+        set vlist {}
+        foreach pair $e {
+            lappend vlist [lindex $pair 1]
+        }
+        return $vlist
+    }
+    
+    # Get the value for a specific key
+    proc getvalue {name key} {
+        upvar ::SArray::${name}::entries e
+        foreach pair $e {
+            if {[lindex $pair 0] eq $key} {
+                return [lindex $pair 1]
+            }
+        }
+        return ""
+    }
+
+    # Get the first key that matches a specific value
+    proc getkey {name value} {
+        upvar ::SArray::${name}::entries e
+        foreach pair $e {
+            if {[lindex $pair 1] eq $value} {
+                return [lindex $pair 0]
+            }
+        }
+        return ""
+    }
+
+    # Export entries
+    proc get {name} {
+        upvar ::SArray::${name}::entries e
+        return $e
+    }
+
+    # Import entries
+    proc set {name dataList} {
+        upvar ::SArray::${name}::entries e
+        set e $dataList
+    }
+
+    # Destroy an instance
+    proc destroy {name} {
+        if {[namespace exists ::SArray::${name}]} {
+            namespace delete ::SArray::${name}
+        }
+    }
+}
 #####################################################
 
 ########## INIT TIGER2hsPE ##############################
@@ -778,16 +911,17 @@ if {[info exists swarmcycle] && $swarmcycle > 0} {
         }
     }
     
-    #initialize counters
-    if {![info exists seed_accepted]} {#restart
+    if {[info exists restart_root]} { #restart
+        puts "Info: SWARM - RESTARTING FROM PREVIOUS JOB"
+        set seed_progress [expr 1.0*$seed_successful/$seed_accepted]
+    } else {
+        #initialize counters
         set seed_accepted 0
         set seed_attempted 0
         set seed_progress 1
         set seed_successful 0
-        array set seed_scores {}
-    } else {
-        set seed_progress [expr 1.0*$seed_successful/$seed_accepted]
-    }
+        set seed_best -1
+    } 
 }
 #####################################################################
 
@@ -882,21 +1016,11 @@ while {$i_run < $num_runs} {
         dcdframe
 
         #collect potential energies
-        array unset RankByPot
-        array unset PotByRank
-        array set RankByPot {}
-        array set PotByRank {}
-        set RankByPot($replica_id) $POTENTIAL
-        set PotByRank($POTENTIAL) $replica_id
+        SArray::new potential_energies
+        SArray::add potential_energies $replica_id $POTENTIAL
         for {set i 0} {$i < $num_replicas} {incr i} {
             if {$i != $replica_id} {
-                set pot [replicaRecv $i]
-                while {[info exists PotByRank($pot)]} {
-                    puts "Warn: TIGER2hsPE - ENERGY DUPLICATES RUN $i_run"
-                    set pot [expr $pot + (rand()*1e-10)]
-                }
-                set RankByPot($i) $pot
-                set PotByRank($pot) $i
+                SArray::add potential_energies $i [replicaRecv $i]
             }
         }
         
@@ -918,8 +1042,8 @@ while {$i_run < $num_runs} {
             
             set BOLTZMAN [expr 0.001987191]
             set dbeta [expr (1.0/($min_temp * $BOLTZMAN))]
-            set pot $RankByPot($tbid)
-            set pot2 $RankByPot($rid)
+            set pot [SArray::getvalue potential_energies $tbid]
+            set pot2 [SArray::getvalue potential_energies $rid]
             set delta [expr $dbeta * ($pot2 - $pot)]
             set doswap [expr $delta < 0. || exp(-1. * $delta) > rand()]
             
@@ -987,20 +1111,20 @@ while {$i_run < $num_runs} {
             incr seed_attempted
             
             #Do we seed now?
-            if {$replica_id == 0} {
+            if {$replica_id == $bid} {
                 #dynamic or static cycle strategy
                 if {$swarmdynamic} {
-                    set swarming_do [expr $seed_progress > rand() ? 1 : 0]
+                    set seed_do [expr $seed_progress > rand() ? 1 : 0]
                 } else {
-                    set swarming_do 1
+                    set seed_do 1
                 }
                 
                 #distribute if we swarm or not    
-                for {set k 1} {$k < $swarmseedreps} {incr k} {
+                for {set k 1} {$k < $num_replicas} {incr k} {
                     replicaSend $seed_do $k
                 }
             } else {
-                set seed_do [replicaRecv 0]
+                set seed_do [replicaRecv $bid]
             }
         }
         
@@ -1011,13 +1135,32 @@ while {$i_run < $num_runs} {
 
             #Collect COLVAR scores
             set score [cv colvar $swarmcolvar value]
-            puts "MY SCORE IS $score"
             
-            #Decide if we have a new best scoring structure
+            #base replica 
+            if {$replica_id == $bid} {
+                #collects scores 
+                SArray::new scores
+                SArray::add scores $replica_id $score
+                for {set i 0} {$i < $num_replicas} {incr i} {
+                    if {$i != $replica_id} {
+                        SArray::add scores $i [replicaRecv $i]
+                    }
+                }
+                SArray::sort scores "value"
+
+                #Decide if we have a new best scoring structure
+                
+            } else {
+                #send score to baseline
+                replicaSend $score $bid
+            }
+            
+            
+            #Inital pool population until full
             
             #Seeding randomly chosen replicas
             
-            #Pool exchange for randomly chosed replicas
+            #Pool exchange for randomly chosen replicas
         }
     }
     ############################################################################
@@ -1038,9 +1181,14 @@ while {$i_run < $num_runs} {
             puts $rfile [list set i_step $i_step]
             puts $rfile [list set restart_root $restart_root]
             
-            #SWARMIN restart information
-            if {$seref} {
-                puts "WARNING TO DO"
+            #SWARMING restart information
+            if {$swarming} {
+                puts $rfile [list set seed_accepted $seed_accepted]
+                puts $rfile [list set seed_attempted $seed_attempted]
+                puts $rfile [list set seed_progress $seed_progress]
+                puts $rfile [list set seed_successful $seed_successful]
+                puts $rfile [list set seed_best $seed_best]
+                #WHAT ABOUT THE POOL
             }
             
             close $rfile
