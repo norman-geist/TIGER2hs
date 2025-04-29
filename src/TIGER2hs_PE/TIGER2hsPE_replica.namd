@@ -729,13 +729,13 @@ namespace eval SArray {
     }
 
     # Export entries
-    proc get {name} {
+    proc export {name} {
         upvar ::SArray::${name}::entries e
         return $e
     }
 
     # Import entries
-    proc set {name dataList} {
+    proc import {name dataList} {
         upvar ::SArray::${name}::entries e
         set e $dataList
     }
@@ -913,12 +913,12 @@ if {[info exists swarmcycle] && $swarmcycle > 0} {
     
     if {[info exists restart_root]} { #restart
         puts "Info: SWARM - RESTARTING FROM PREVIOUS JOB"
-        set seed_progress [expr 1.0*$seed_successful/$seed_accepted]
+        set seed_prob [expr 1.0*$seed_successful/$seed_accepted]
     } else {
         #initialize counters
         set seed_accepted 0
         set seed_attempted 0
-        set seed_progress 1
+        set seed_prob 1
         set seed_successful 0
         set seed_best -1
     } 
@@ -1016,11 +1016,12 @@ while {$i_run < $num_runs} {
         dcdframe
 
         #collect potential energies
-        SArray::new potential_energies
-        SArray::add potential_energies $replica_id $POTENTIAL
+        array unset RankByPot
+        array set RankByPot {}
+        set RankByPot($replica_id) $POTENTIAL
         for {set i 0} {$i < $num_replicas} {incr i} {
             if {$i != $replica_id} {
-                SArray::add potential_energies $i [replicaRecv $i]
+                set RankByPot($i) [replicaRecv $i]
             }
         }
         
@@ -1042,8 +1043,8 @@ while {$i_run < $num_runs} {
             
             set BOLTZMAN [expr 0.001987191]
             set dbeta [expr (1.0/($min_temp * $BOLTZMAN))]
-            set pot [SArray::getvalue potential_energies $tbid]
-            set pot2 [SArray::getvalue potential_energies $rid]
+            set pot $RankByPot($tbid)
+            set pot2 $RankByPot($rid)
             set delta [expr $dbeta * ($pot2 - $pot)]
             set doswap [expr $delta < 0. || exp(-1. * $delta) > rand()]
             
@@ -1111,10 +1112,10 @@ while {$i_run < $num_runs} {
             incr seed_attempted
             
             #Do we seed now?
-            if {$replica_id == $bid} {
+            if {$replica_id == 0} {
                 #dynamic or static cycle strategy
                 if {$swarmdynamic} {
-                    set seed_do [expr $seed_progress > rand() ? 1 : 0]
+                    set seed_do [expr $seed_prob > rand() ? 1 : 0]
                 } else {
                     set seed_do 1
                 }
@@ -1124,7 +1125,7 @@ while {$i_run < $num_runs} {
                     replicaSend $seed_do $k
                 }
             } else {
-                set seed_do [replicaRecv $bid]
+                set seed_do [replicaRecv 0]
             }
         }
         
@@ -1132,34 +1133,99 @@ while {$i_run < $num_runs} {
         if {$seed_do} {
             incr seed_accepted
             puts "Info: SWARM - CYCLE $seed_accepted"
-
+            
             #Collect COLVAR scores
             set score [cv colvar $swarmcolvar value]
             
             #base replica 
-            if {$replica_id == $bid} {
+            if {$replica_id == 0} {
+                puts stderr "SWARM_CYCLE $seed_accepted RUN $i_run"
+                set swarm_prob [expr 1.0*$seed_accepted/$seed_attempted]
+                puts stderr "SWARM_PROBABILITY $seed_accepted $seed_attempted $swarm_prob"
+            
                 #collects scores 
+                puts "Info: SWARM - COLLECTING CVs FROM REPLICAS"
                 SArray::new scores
                 SArray::add scores $replica_id $score
+                puts stderr "SEED_OFFER $seed_accepted $replica_id $score"
                 for {set i 0} {$i < $num_replicas} {incr i} {
                     if {$i != $replica_id} {
-                        SArray::add scores $i [replicaRecv $i]
+                        set tmp_score [replicaRecv $i]
+                        puts stderr "SEED_OFFER $seed_accepted $i $tmp_score"
+                        SArray::add scores $i $tmp_score
                     }
                 }
                 SArray::sort scores "value"
+                set tmp_best [SArray::first scores]
 
-                #Decide if we have a new best scoring structure
+                #Decide if we have a new best scoring structure (or first cycle)
+                if {$seed_accepted == 1 || [lindex $seed_best 1] > [lindex $tmp_best 1]} {
+                    incr seed_successful
+                    set seed_best $tmp_best
+                    set seed_rep [lindex $seed_best 0]
+                    puts stderr "NEW_SEED $seed_accepted [lindex $seed_best 0] [lindex $seed_best 1]"
+                    
+                    #save this current structure coordinates to assemble path trajectory?
+                    file copy [format "$output_root.offer.$seed_rep.coor" ""] [format "$output_root.swarm.$seed_successful.coor" ""]
+                    
+                    #Seeding randomly chosen replicas
+                    set rused {}
+                    for {set i 0} {$i < $swarmseedreps} {incr i} {
+                        set rid [rselect $num_replicas $rused]
+                        lappend rused $rid
+                        
+                        #send the replica id to seed from
+                        if {$rid != $replica_id} {
+                            replicaSend $rid [lindex $seed_best 0]
+                        } else {#oh its me
+                            puts "Info: SWARM - SEEDING FROM $seed_rep"
+                    
+                            #load restart
+                            reinitatoms [format "$output_root.offer.$seed_rep.coor" ""]
+                            minimize 0; #del vels
+                            reinitvels [expr $min_temp/2.]; #reinitvels
+                            
+                            lappend rused $replica_id
+                        }
+                    }
+                    
+                    #Send all remaining a -1 signal
+                    while {[llength $rused] < $num_replicas} {
+                        set rid [rselect $num_replicas $rused]
+                        lappend rused $rid
+                        
+                        #send a -1
+                        replicaSend $rid -1
+                    }
+                } else {
+                    puts stderr "OLD_SEED $seed_accepted [lindex $seed_best 0] [lindex $seed_best 1]"
+                }
                 
-            } else {
+                #report progress ratio
+                set seed_prob [expr 1.0*$seed_successful/$seed_accepted]
+                puts stderr "SEED_PROGRESS $seed_successful $seed_accepted $seed_prob"
+                
+            } else {#worker replica branch
                 #send score to baseline
-                replicaSend $score $bid
+                replicaSend $score 0
+                
+                #recieve replica id to load or -1 if nothing to do
+                set seed_rep [replicaRecv 0]
+                if {$seed_rep > -1} {
+                    puts "Info: SWARM - SEEDING FROM $seed_rep"
+                    
+                    #load restart
+                    reinitatoms [format "$output_root.offer.$seed_rep.coor" ""]
+                    minimize 0; #del vels
+                    reinitvels [expr $min_temp/2.]; #reinitvels
+                    
+                } else {
+                    puts "Info: SWARM - NO SEEDING, WALKING ON"
+                }
             }
             
-            
             #Inital pool population until full
-            
-            #Seeding randomly chosen replicas
-            
+
             #Pool exchange for randomly chosen replicas
         }
     }
@@ -1185,7 +1251,7 @@ while {$i_run < $num_runs} {
             if {$swarming} {
                 puts $rfile [list set seed_accepted $seed_accepted]
                 puts $rfile [list set seed_attempted $seed_attempted]
-                puts $rfile [list set seed_progress $seed_progress]
+                puts $rfile [list set seed_prob $seed_prob]
                 puts $rfile [list set seed_successful $seed_successful]
                 puts $rfile [list set seed_best $seed_best]
                 #WHAT ABOUT THE POOL
