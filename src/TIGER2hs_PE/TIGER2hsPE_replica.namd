@@ -1103,14 +1103,14 @@ while {$i_run < $num_runs} {
     
     ################################ SWARM CYCLE ###############################
     if {$swarming} {
-    
-        #Replicas have already saved their current states for TIGER2h, we reuse them here
-        
+
         #is a swarmcycle due?
         if {[expr $i_run % $swarmcycle] == 0 && $i_run >= $swarmcycle} {
         
+            replicaBarrier
+        
             incr seed_attempted
-            
+
             #Do we seed now?
             if {$replica_id == 0} {
                 #dynamic or static cycle strategy
@@ -1144,21 +1144,20 @@ while {$i_run < $num_runs} {
                 puts stderr "SWARM_PROBABILITY $seed_accepted $seed_attempted $swarm_prob"
             
                 #collects scores 
-                puts "Info: SWARM - COLLECTING CVs FROM REPLICAS"
+                puts "Info: SWARM - COLLECTING CV SCORES FROM REPLICAS"
                 SArray::new scores
                 SArray::add scores $replica_id $score
                 puts stderr "SEED_OFFER $seed_accepted $replica_id $score"
-                for {set i 0} {$i < $num_replicas} {incr i} {
-                    if {$i != $replica_id} {
-                        set tmp_score [replicaRecv $i]
-                        puts stderr "SEED_OFFER $seed_accepted $i $tmp_score"
-                        SArray::add scores $i $tmp_score
-                    }
+                for {set i 1} {$i < $num_replicas} {incr i} {
+                    set tmp_score [replicaRecv $i]
+                    puts stderr "SEED_OFFER $seed_accepted $i $tmp_score"
+                    SArray::add scores $i $tmp_score
                 }
                 SArray::sort scores "value"
                 set tmp_best [SArray::first scores]
 
                 #Decide if we have a new best scoring structure (or first cycle)
+                set rused {}
                 if {$seed_accepted == 1 || [lindex $seed_best 1] > [lindex $tmp_best 1]} {
                     incr seed_successful
                     set seed_best $tmp_best
@@ -1169,36 +1168,39 @@ while {$i_run < $num_runs} {
                     file copy [format "$output_root.offer.$seed_rep.coor" ""] [format "$output_root.swarm.$seed_successful.coor" ""]
                     
                     #Seeding randomly chosen replicas
-                    set rused {}
                     for {set i 0} {$i < $swarmseedreps} {incr i} {
                         set rid [rselect $num_replicas $rused]
                         lappend rused $rid
                         
+                        puts "Info: SWARM - SEEDING REPLICA $rid FROM $seed_rep"
+                        
                         #send the replica id to seed from
                         if {$rid != $replica_id} {
-                            replicaSend $rid [lindex $seed_best 0]
+                            replicaSend $seed_rep $rid
                         } else {#oh its me
                             puts "Info: SWARM - SEEDING FROM $seed_rep"
                     
                             #load restart
-                            reinitatoms [format "$output_root.offer.$seed_rep.coor" ""]
-                            minimize 0; #del vels
+                            reinitatoms [format "$output_root.offer.$seed_rep" ""]
+                            minimize 0; #del vels to diverge timelines
                             reinitvels [expr $min_temp/2.]; #reinitvels
-                            
-                            lappend rused $replica_id
                         }
-                    }
-                    
-                    #Send all remaining a -1 signal
-                    while {[llength $rused] < $num_replicas} {
-                        set rid [rselect $num_replicas $rused]
-                        lappend rused $rid
-                        
-                        #send a -1
-                        replicaSend $rid -1
-                    }
+                    }  
                 } else {
                     puts stderr "OLD_SEED $seed_accepted [lindex $seed_best 0] [lindex $seed_best 1]"
+                }
+                set pused $rused; #exclude seeded replicas from pool exchange
+                
+                #Send all remaining replica the -1 signal
+                while {[llength $rused] < $num_replicas} {
+                    set rid [rselect $num_replicas $rused]
+                    lappend rused $rid
+                    
+                    if {$rid != $replica_id} {
+                        replicaSend -1 $rid
+                    } else {#oh its me
+                        puts "Info: SWARM - NO SEEDING FOR ME, WALKING ON"
+                    }
                 }
                 
                 #report progress ratio
@@ -1207,22 +1209,26 @@ while {$i_run < $num_runs} {
                 
             } else {#worker replica branch
                 #send score to baseline
+                puts "Info: SWARM - SENDING CV SCORE"
                 replicaSend $score 0
                 
                 #recieve replica id to load or -1 if nothing to do
+                puts "Info: SWARM - WAITING FOR SEEDING INFORMATION"
                 set seed_rep [replicaRecv 0]
                 if {$seed_rep > -1} {
                     puts "Info: SWARM - SEEDING FROM $seed_rep"
                     
                     #load restart
-                    reinitatoms [format "$output_root.offer.$seed_rep.coor" ""]
-                    minimize 0; #del vels
+                    reinitatoms [format "$output_root.offer.$seed_rep" ""]
+                    minimize 0; #del vels to diverge timelines
                     reinitvels [expr $min_temp/2.]; #reinitvels
                     
                 } else {
-                    puts "Info: SWARM - NO SEEDING, WALKING ON"
+                    puts "Info: SWARM - NO SEEDING FOR ME, WALKING ON"
                 }
             }
+            
+            replicaBarrier
             
             #Inital pool population until full
 
@@ -1258,6 +1264,7 @@ while {$i_run < $num_runs} {
             }
             
             close $rfile
+            
             if [info exists old_restart_root] {
                 set oldroot [format $old_restart_root ""]
                 file delete $oldroot.tcl
