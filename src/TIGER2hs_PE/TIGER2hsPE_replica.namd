@@ -1223,6 +1223,8 @@ while {$i_run < $num_runs} {
                         set seed_ids    [lrange [SArray::keys   scores] 0 [expr $swarmpoolreps-1]]
                         set seed_scores [lrange [SArray::values scores] 0 [expr $swarmpoolreps-1]]
                         
+                        #sort the pool scores bad->good so replace the worst ones first
+                        SArray::sort swarm_pool "value" "-real -decreasing"
                         foreach key $seed_ids value $seed_scores {
                             #find a pool_id to replace with worse score
                             set pool_id -1
