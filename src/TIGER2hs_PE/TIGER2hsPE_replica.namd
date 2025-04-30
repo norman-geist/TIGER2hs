@@ -1252,7 +1252,7 @@ while {$i_run < $num_runs} {
                             set rid [rselect $num_replicas $rused]
                             lappend rused $rid
                             
-                            set pool_id [rselect $swarmpoolsize]
+                            set pool_id [rselect $swarmpoolsize {}]
                             
                             puts "Info: SWARM - SEEDING REPLICA $rid FROM POOL STRUCTURE $pool_id"
                             
@@ -1296,12 +1296,16 @@ while {$i_run < $num_runs} {
             #Perform seeding based on seeding_msg recieved (or set in case of baseline rep)
             if {[llength $seed_msg] == 2 && [lindex $seed_msg 0] == "SEED"} {
                 set seed_rep [lindex $seed_msg 1]
-                puts "Info: SWARM - SEEDING FROM $seed_rep"
-                
-                #get seeded
-                reinitatoms [format "$output_root.offer.$seed_rep" ""]
-                minimize 0; #del vels to diverge timelines
-                reinitvels [expr $min_temp/2.]; #reinitvels
+                if {$seed_rep != $replica_id} {
+                    puts "Info: SWARM - SEEDING FROM $seed_rep"
+                    
+                    #get seeded
+                    reinitatoms [format "$output_root.offer.$seed_rep" ""]
+                    minimize 0; #del vels to diverge timelines
+                    reinitvels [expr $min_temp/2.]; #reinitvels
+                } else {
+                    puts "Info: SWARM - SEEDING SKIPPED, IT WAS ME"
+                }
                 
             } elseif {[llength $seed_msg] == 2 && [lindex $seed_msg 0] == "POOL"} {
                 set pool_id [lindex $seed_msg 1]
@@ -1345,7 +1349,7 @@ while {$i_run < $num_runs} {
                 puts $rfile [list set seed_attempted $seed_attempted]
                 puts $rfile [list set seed_successful $seed_successful]
                 puts $rfile [list set seed_best $seed_best]
-                #WHAT ABOUT THE POOL BOOK KEEPING
+                puts $rfile [list set SArray::import swarm_pool [SArray::export $swarm_pool]]
             }
             
             close $rfile
