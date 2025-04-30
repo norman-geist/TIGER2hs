@@ -1186,7 +1186,7 @@ while {$i_run < $num_runs} {
                         if {$rid != $replica_id} {
                             replicaSend [list SEED $seed_rep] $rid
                         } else {#oh its me
-                            set seed_msg [list SEED $rid]
+                            set seed_msg [list SEED $seed_rep]
                         }
                     }  
                 } else {
