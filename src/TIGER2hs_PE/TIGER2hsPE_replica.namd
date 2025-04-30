@@ -741,6 +741,7 @@ namespace eval SArray {
 
     # Import entries
     proc import {name dataList} {
+        SArray::new $name
         upvar ::SArray::${name}::entries e
         set e $dataList
     }
@@ -919,6 +920,7 @@ if {[info exists swarmcycle] && $swarmcycle > 0} {
     if {[info exists restart_root]} { #restart
         puts "Info: SWARM - RESTARTING FROM PREVIOUS JOB"
         set seed_prob [expr 1.0*$seed_successful/$seed_accepted]
+        SArray::import swarm_pool $swarm_pool_import
     } else {
         #initialize counters
         set seed_accepted 0
@@ -1349,7 +1351,7 @@ while {$i_run < $num_runs} {
                 puts $rfile [list set seed_attempted $seed_attempted]
                 puts $rfile [list set seed_successful $seed_successful]
                 puts $rfile [list set seed_best $seed_best]
-                puts $rfile [list set SArray::import swarm_pool [SArray::export $swarm_pool]]
+                puts $rfile [list set swarm_pool_import [SArray::export swarm_pool]]
             }
             
             close $rfile
