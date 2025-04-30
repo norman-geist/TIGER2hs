@@ -1265,7 +1265,6 @@ while {$i_run < $num_runs} {
                                 set seed_msg [list POOL $pool_id]
                             }
                         }
-                        
                     }   
                 }
                 
@@ -1321,9 +1320,6 @@ while {$i_run < $num_runs} {
             } else {
                 puts "Info: SWARM - NO SEEDING FOR ME, WALKING ON"
             }
-            
-            
-            replicaBarrier
         }
     }
     ############################################################################
@@ -1337,7 +1333,9 @@ while {$i_run < $num_runs} {
         set rfile [open [format "$restart_root.$replica_id.tcl" $replica_id] "w"]
         puts $rfile [list array set replica [array get replica]]
         close $rfile
+        
         replicaBarrier
+        
         if { $replica_id == 0 } {
             set rfile [open [format "$restart_root.tcl" ""] "w"]
             puts $rfile [list set i_job [expr $i_job + 1]]
@@ -1361,7 +1359,9 @@ while {$i_run < $num_runs} {
                 file delete $oldroot.tcl
             }
         }
+        
         replicaBarrier
+        
         if [info exists old_restart_root] {
             set oldroot [format $old_restart_root $replica_id]
             file delete $oldroot.$replica_id.tcl
