@@ -753,6 +753,16 @@ namespace eval SArray {
         }
     }
 }
+
+#check diversity of values against a list using a relative threshold
+proc is_diverse {value valuelist threshold} {
+    foreach v $valuelist {
+        if {[expr abs($value - $v)] <= [expr ($threshold * abs($v))]} {
+            return 0
+        }
+    }
+    return 1
+}
 #####################################################
 
 ########## INIT TIGER2hsPE ##############################
@@ -1228,9 +1238,11 @@ while {$i_run < $num_runs} {
                         foreach key $seed_ids value $seed_scores {
                             #find a pool_id to replace with worse score
                             set pool_id -1
+                            set pool_scores [SArray::values swarm_pool]
                             set i 0
-                            foreach pool_score [SArray::values swarm_pool] {
-                                if {$pool_score > $value} {
+                            foreach pool_score $pool_scores {
+                                #Check if we dont already have a structure close to this  
+                                if {$pool_score > $value && [is_diverse $value $pool_scores $swarmpooldiversity]} {                                                              
                                     set pool_id [lindex [SArray::keys swarm_pool] $i]
                                     break;
                                 }
