@@ -1123,6 +1123,7 @@ while {$i_run < $num_runs} {
     if {$swarming} {
 
         #is a swarmcycle due?
+        set seed_do 0
         if {[expr $i_run % $swarmcycle] == 0 && $i_run >= $swarmcycle} {
         
             replicaBarrier
