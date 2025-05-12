@@ -1206,33 +1206,38 @@ while {$i_run < $num_runs} {
                 
                 #Maintain a structure pool?
                 if {$swarmpoolsize} {
-                    #Populate structure pool with  best structures each cycle until full
+                    #Populate structure pool each cycle until full
                     if {[SArray::count swarm_pool] < $swarmpoolsize} {
                         puts "Info: SWARM - STRUCTURE POOL POPULATION PHASE"
                     
-                        #get N=$swarmpoolreps best seed offers this cycle
-                        set seed_ids    [lrange [SArray::keys   scores] 0 [expr $swarmpoolreps-1]]
-                        set seed_scores [lrange [SArray::values scores] 0 [expr $swarmpoolreps-1]]
+                        set seed_ids    [SArray::keys   scores]
+                        set seed_scores [SArray::values scores]
                         
                         foreach key $seed_ids value $seed_scores {
-                            #copy files into pool
-                            set pool_id [SArray::count swarm_pool]
-                            file copy -force [format "$output_root.offer.$key.coor" ""] "$pool_output_root/$pool_id.coor"
-                            file copy -force [format "$output_root.offer.$key.vel"  ""] "$pool_output_root/$pool_id.vel" 
-                            file copy -force [format "$output_root.offer.$key.xsc"  ""] "$pool_output_root/$pool_id.xsc"
-                            
-                            #pool book keeping
-                            SArray::add swarm_pool $pool_id $value
-                            
-                            puts "Info: SWARM - POOL STRUCTURE $pool_id ADDED    - REPLICA $key WITH SCORE $value"
+
+                            #copy files into pool if diverse enough
+                            set pool_scores [SArray::values swarm_pool]
+                            if {[is_diverse $value $pool_scores $swarmpooldiversity]} {                                                              
+
+                                set pool_id [lindex [SArray::keys swarm_pool] $i]
+                                                            
+                                file copy -force [format "$output_root.offer.$key.coor" ""] "$pool_output_root/$pool_id.coor"
+                                file copy -force [format "$output_root.offer.$key.vel"  ""] "$pool_output_root/$pool_id.vel" 
+                                file copy -force [format "$output_root.offer.$key.xsc"  ""] "$pool_output_root/$pool_id.xsc"
+                                
+                                #pool book keeping
+                                SArray::add swarm_pool $pool_id $value
+                                
+                                puts "Info: SWARM - POOL STRUCTURE $pool_id ADDED    - REPLICA $key WITH SCORE $value"
+                            }
                         }
                     } else {
                         #Override worst structures in pool if we have better ones here?
                         puts "Info: SWARM - STRUCTURE POOL MAINTENANCE PHASE"
                         
                         #get N=$swarmpoolreps best seed offers this cycle
-                        set seed_ids    [lrange [SArray::keys   scores] 0 [expr $swarmpoolreps-1]]
-                        set seed_scores [lrange [SArray::values scores] 0 [expr $swarmpoolreps-1]]
+                        set seed_ids    [SArray::keys   scores]
+                        set seed_scores [SArray::values scores]
                         
                         #sort the pool scores bad->good so replace the worst ones first
                         SArray::sort swarm_pool "value" "-real -decreasing"
@@ -1242,7 +1247,7 @@ while {$i_run < $num_runs} {
                             set pool_scores [SArray::values swarm_pool]
                             set i 0
                             foreach pool_score $pool_scores {
-                                #Check if we dont already have a structure close to this  
+                                #Check if better & we dont already have a too similar structure
                                 if {$pool_score > $value && [is_diverse $value $pool_scores $swarmpooldiversity]} {                                                              
                                     set pool_id [lindex [SArray::keys swarm_pool] $i]
                                     break;
@@ -1264,20 +1269,24 @@ while {$i_run < $num_runs} {
                         }
                         
                         #Seed randomly selected replicas with randomly selected pool structure
-                        puts "Info: SWARM - SEEDING FROM STRUCTURE POOL"
-                        for {set i 0} {$i < $swarmpoolreps} {incr i} {
-                            set rid [rselect $num_replicas $rused]
-                            lappend rused $rid
-                            
-                            set pool_id [rselect $swarmpoolsize {}]
-                            
-                            puts "Info: SWARM - SEEDING REPLICA $rid FROM POOL STRUCTURE $pool_id"
-                            
-                            #send the replica id to seed from
-                            if {$rid != $replica_id} {
-                                replicaSend [list POOL $pool_id] $rid
-                            } else {#oh its me
-                                set seed_msg [list POOL $pool_id]
+                        #Anti-proportional to success_rate of seeding cycles -> escape stagnation
+                        set pool_do [expr 1.-$seed_prob > rand() ? 1 : 0]
+                        if {$pool_do} {
+                            puts "Info: SWARM - SEEDING FROM STRUCTURE POOL"
+                            for {set i 0} {$i < $swarmpoolreps} {incr i} {
+                                set rid [rselect $num_replicas $rused]
+                                lappend rused $rid
+                                
+                                set pool_id [rselect $swarmpoolsize {}]
+                                
+                                puts "Info: SWARM - SEEDING REPLICA $rid FROM POOL STRUCTURE $pool_id"
+                                
+                                #send the replica id to seed from
+                                if {$rid != $replica_id} {
+                                    replicaSend [list POOL $pool_id] $rid
+                                } else {#oh its me
+                                    set seed_msg [list POOL $pool_id]
+                                }
                             }
                         }
                     }   
