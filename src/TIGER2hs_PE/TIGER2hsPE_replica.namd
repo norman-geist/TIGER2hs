@@ -1219,7 +1219,7 @@ while {$i_run < $num_runs} {
                             set pool_scores [SArray::values swarm_pool]
                             if {[is_diverse $value $pool_scores $swarmpooldiversity]} {                                                              
 
-                                set pool_id [lindex [SArray::keys swarm_pool] $i]
+                                set pool_id [SArray::count swarm_pool]
                                                             
                                 file copy -force [format "$output_root.offer.$key.coor" ""] "$pool_output_root/$pool_id.coor"
                                 file copy -force [format "$output_root.offer.$key.vel"  ""] "$pool_output_root/$pool_id.vel" 
