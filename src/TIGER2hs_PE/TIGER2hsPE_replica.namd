@@ -1154,7 +1154,12 @@ while {$i_run < $num_runs} {
             puts "Info: SWARM - CYCLE $seed_accepted"
             
             #Collect COLVAR scores
+            timer_start "CV"
             set score [cv colvar $swarmcolvar value]
+            timer_stop "CV"
+            
+            set tCV [s2human [timer_get "CV"]]
+            puts "Info: SWARM - CV COMPUTATION TOOK $tCV"
             
             #base replica does the heavy lifting
             if {$replica_id == 0} {
