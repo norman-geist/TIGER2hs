@@ -754,14 +754,22 @@ namespace eval SArray {
     }
 }
 
-#check diversity of values against a list using a relative threshold
+#check diversity of values against a list using a relative threshold on the value range
 proc is_diverse {value valuelist threshold} {
+    if {[llength $valuelist] < 2} {
+        return 1  ;# Always accept if pool is small
+    }
+
+    set min_val [tcl::mathfunc::min {*}$valuelist]
+    set max_val [tcl::mathfunc::max {*}$valuelist]
+    set range [expr {$max_val - $min_val + 1e-8}]
+
     foreach v $valuelist {
-        if {[expr abs($value - $v)] <= [expr ($threshold * abs($v))]} {
-            return 0
+        if {[expr {abs($value - $v) < ($threshold * $range)}]} {
+            return 0  ;# Too similar to existing values
         }
     }
-    return 1
+    return 1  ;# Diverse enough
 }
 #####################################################
 
