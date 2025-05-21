@@ -57,9 +57,9 @@ proc calc_CMOV {args} {
     }
 
     if {$n_pairs == 0} {
-        return 0.0
+        return 1.00
     }
 
-    set cmov [expr {1.0 - $sum_diff / double($n_pairs)}]
+    set cmov [expr {$sum_diff / double($n_pairs)}]
     return $cmov
 }
