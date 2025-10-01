@@ -72,6 +72,9 @@ def parse_arguments():
     parser.add_argument("--nogbsa", action="store_true",
                         dest="nogbsa")
     
+    parser.add_argument("-fast", "--fast", action="store", 
+                        dest="fastmode", default=None)
+    
     return parser.parse_args()
 
 
@@ -110,9 +113,14 @@ def main(argv):
         universe.atoms.wrap(compound="fragments", box=(a, b, c, 90, 90, 90))
         topology.setBox(a, b, c)
         
+        #calculate cutoff if not in fastmode
         if a and b and c:
             cutoff = np.min([a, b, c]) / 2 - 0.0001
             cutoff *= u.angstrom
+            
+        if argv.fastmode != None:
+            log.warning("nonbondedCutoff override " + argv.fastmode)
+            cutoff= u.angstrom * float(argv.fastmode)
             
             system = topology.createSystem(parameters,
                                            nonbondedCutoff=cutoff,
@@ -126,11 +134,23 @@ def main(argv):
     else:
         log.warning("Using a non-periodic system...")
         
-        system = topology.createSystem(parameters,
-                                       nonbondedMethod=NoCutoff,
-                                       implicitSolvent=GBMODEL,
-                                       implicitSolventSaltConc=argv.saltcon * (u.moles/u.liter),
-                                       gbsaModel=GBSA)
+        #use fast cutoff
+        if argv.fastmode != None:
+            log.warning("nonbondedCutoff override " + argv.fastmode)
+            cutoff= u.angstrom * float(argv.fastmode)
+            
+            system = topology.createSystem(parameters,
+                                        nonbondedCutoff=cutoff,
+                                        nonbondedMethod=CutoffNonPeriodic,
+                                        implicitSolvent=GBMODEL,
+                                        implicitSolventSaltConc=argv.saltcon * (u.moles/u.liter),
+                                        gbsaModel=GBSA)
+        else:
+            system = topology.createSystem(parameters,
+                                        nonbondedMethod=NoCutoff,
+                                        implicitSolvent=GBMODEL,
+                                        implicitSolventSaltConc=argv.saltcon * (u.moles/u.liter),
+                                        gbsaModel=GBSA)
 
     integrator = CustomIntegrator(0) # placeholder since we don't run a simulation
     coordinates = universe.atoms.positions * u.angstrom
