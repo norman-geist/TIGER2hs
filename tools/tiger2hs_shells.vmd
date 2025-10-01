@@ -39,8 +39,8 @@ for {set i 0} {$i < $frames} {incr i $stride} {
   animate goto $i
   set shell 0
   while {$shell*$spacing <= $maxdist} {
-	set sel1 "(all pbwithin [expr  $shell   *$spacing] of ($solutesel)) and $solventsel"
-	set sel2 "(all pbwithin [expr ($shell+1)*$spacing] of ($solutesel)) and $solventsel"
+	set sel1 "(all pbwithin [expr { $shell   *$spacing  }] of ($solutesel)) and $solventsel"
+	set sel2 "(all pbwithin [expr { ($shell+1)*$spacing }] of ($solutesel)) and $solventsel"
 	set sel [atomselect top "($sel2) and not ($sel1)"]
 	
 	incr data($shell) [$sel num]
@@ -59,9 +59,9 @@ puts $out "#dist #count/spacing #cumulative_sum"
 set shells [lsort -integer -increasing [array names data]]
 set cum 0
 foreach shell $shells {
-  set c [expr 1. * $data($shell) /($avg*$spacing)]
-  set s [expr $shell*$spacing]
-  set cum [expr 1. * $cum + ($spacing*$c)]
+  set c [expr { 1. * $data($shell) /($avg*$spacing) }]
+  set s [expr { $shell*$spacing }]
+  set cum [expr { 1. * $cum + ($spacing*$c) }]
   puts $out "$s $c $cum"
 }
 close $out
