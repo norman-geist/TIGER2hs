@@ -118,9 +118,9 @@ def main(argv):
             cutoff = np.min([a, b, c]) / 2 - 0.0001
             cutoff *= u.angstrom
             
-        if argv.fastmode != None:
-            log.warning("nonbondedCutoff override " + argv.fastmode)
-            cutoff= u.angstrom * float(argv.fastmode)
+            if argv.fastmode != None:
+                log.warning("nonbondedCutoff override " + argv.fastmode)
+                cutoff= u.angstrom * float(argv.fastmode)
             
             system = topology.createSystem(parameters,
                                            nonbondedCutoff=cutoff,

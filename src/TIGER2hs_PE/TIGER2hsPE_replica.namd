@@ -754,6 +754,37 @@ namespace eval SArray {
     }
 }
 
+#Unpack colvars and optmization functions
+proc parse_swarm_colvars {cv_config} {
+
+    array set swarm_colvars {}
+    
+    set cv_config [string trim $cv_config]
+    set raw [split $cv_config ,]
+
+    # regex validating and capturing function and argument
+    set pattern {^([a-zA-Z_][a-zA-Z0-9_]*)\(([a-zA-Z_][a-zA-Z0-9_]*)\)$}
+
+    foreach tmp $raw {
+        set tmp [string trim $tmp]
+        
+        if {[regexp $pattern $tmp -> func arg]} {
+            set swarm_colvars($arg) $func
+        } else {
+            error "Invalid function/argument structure: \"$tmp\""
+        }
+    }
+    return [array get swarm_colvars]
+}
+
+#Optimization functions
+proc swarm_opt_min {val1 val2} {
+    return [expr $val1 < $val2]
+}
+proc swarm_opt_max {val1 val2} {
+    return [expr $val1 > $val2]
+}
+
 #check diversity of values against a list using a relative threshold on the value range
 proc is_diverse {value valuelist threshold} {
     set n [llength $valuelist]
@@ -914,6 +945,14 @@ if {[info exists swarmcycle] && $swarmcycle > 0} {
     puts "Info: TIGER2hsPE - ENABLED SWARMING MODIFICATION"
     set swarming 1
     
+    #Unpack and check SWARM COLVARS
+    puts "Info: SWARM - CONFIGURING ROUND-ROBIN SCHEME FOR MULTIPLE CV OPTIMIZATION"
+    array set swarm_colvars [parse_swarm_colvars $swarmcolvar]
+    
+    foreach {seed_cv seed_opt} [array get swarm_colvars] {
+        puts "Info: SWARM - REGISTERED CV $seed_cv WITH FUNCTION ${seed_opt}()"
+    }
+    
     #Sanity checks
     if {[expr $swarmseedreps+$swarmpoolreps] < 1} {
       error "need at least one seed or pool replica to do anything"
@@ -941,16 +980,25 @@ if {[info exists swarmcycle] && $swarmcycle > 0} {
 
     if {[info exists restart_root]} { #restart
         puts "Info: SWARM - RESTARTING FROM PREVIOUS JOB"
-        set seed_prob [expr 1.0*$seed_successful/$seed_accepted]
-        SArray::import swarm_pool $swarm_pool_import
+        set i 0
+        foreach seed_cv [array names swarm_colvars] {
+            set swarm(seed_prob_${seed_cv}) [expr 1.0*$swarm(seed_successful_${seed_cv})/$swarm(seed_accepted_${seed_cv})]
+            SArray::import swarm_pool_${seed_cv} [lindex $swarm_pool_import $i]
+            incr i
+        }
     } else {
-        #initialize counters
-        set seed_accepted 0
-        set seed_attempted 0
-        set seed_prob 1
-        set seed_successful 0
-        set seed_best -1
-        SArray::new swarm_pool
+        #initialize counters and pool
+        foreach seed_cv [array names swarm_colvars] {
+            set swarm(seed_accepted_$seed_cv)   0
+            set swarm(seed_attempted_$seed_cv)  0
+            set swarm(seed_prob_$seed_cv)       1
+            set swarm(seed_successful_$seed_cv) 1
+            set swarm(seed_best_$seed_cv)      -1
+            
+            SArray::new swarm_pool_${seed_cv}
+        }
+        set seed_next -1
+        set seed_path 0
     } 
 }
 #####################################################################
@@ -1139,14 +1187,27 @@ while {$i_run < $num_runs} {
         if {[expr $i_run % $swarmcycle] == 0 && $i_run >= $swarmcycle} {
         
             replicaBarrier
+            
+            #Which CV's turn is it? (could also do rselect the CV here)
+            #increase counter
+            incr seed_next
+            
+            #Reset round-robin counter?
+            if {[expr $seed_next >= [array size swarm_colvars]]} {
+                set seed_next 0
+            }
+            
+            #Get the CV name and function
+            set seed_cv  [lindex [array names swarm_colvars] $seed_next]
+            set seed_opt $swarm_colvars($seed_cv)
         
-            incr seed_attempted
+            incr swarm(seed_attempted_${seed_cv})
 
             #Do we seed now?
             if {$replica_id == 0} {
                 #dynamic or static cycle strategy
                 if {$swarmdynamic} {
-                    set seed_do [expr $seed_prob > rand() ? 1 : 0]
+                    set seed_do [expr $swarm(seed_prob_${seed_cv}) > rand() ? 1 : 0]
                 } else {
                     set seed_do 1
                 }
@@ -1162,53 +1223,59 @@ while {$i_run < $num_runs} {
         
         #Perform swarming cycle
         if {$seed_do} {
-            incr seed_accepted
-            puts "Info: SWARM - CYCLE $seed_accepted"
+            incr seed_path
+            incr swarm(seed_accepted_${seed_cv})
+            
+            set seed_caption "${seed_next}:${seed_opt}(${seed_cv})"
+            
+            puts "Info: SWARM - $seed_caption - CYCLE $swarm(seed_accepted_${seed_cv})"
             
             #Collect COLVAR scores
-            timer_start "CV"
-            set score [cv colvar $swarmcolvar value]
-            timer_stop "CV"
-            
-            set tCV [s2human [timer_get "CV"]]
-            puts "Info: SWARM - CV COMPUTATION TOOK $tCV"
+            set score [cv colvar $seed_cv value]
             
             #base replica does the heavy lifting
             if {$replica_id == 0} {
-                puts stderr "SWARM_CYCLE $seed_accepted RUN $i_run"
-                set swarm_prob [expr 1.0*$seed_accepted/$seed_attempted]
-                puts stderr "SWARM_PROBABILITY $seed_accepted $seed_attempted $swarm_prob"
+                puts stderr "SWARM_CYCLE $seed_next $swarm(seed_accepted_${seed_cv}) RUN $i_run"
+                set swarm_prob [expr 1.0*$swarm(seed_accepted_${seed_cv})/$swarm(seed_attempted_${seed_cv})]
+                puts stderr "SWARM_PROBABILITY $seed_next $swarm(seed_accepted_${seed_cv}) $swarm(seed_attempted_${seed_cv}) $swarm_prob"
             
                 #collects scores 
-                puts "Info: SWARM - COLLECTING CV SCORES FROM REPLICAS"
+                puts "Info: SWARM - $seed_caption - COLLECTING CV SCORES FROM REPLICAS"
                 SArray::new scores
                 SArray::add scores $replica_id $score
-                puts stderr "SEED_OFFER $seed_accepted $replica_id $score"
+                puts stderr "SEED_OFFER $seed_next $swarm(seed_accepted_${seed_cv}) $replica_id $score"
                 for {set i 1} {$i < $num_replicas} {incr i} {
                     set tmp_score [replicaRecv $i]
-                    puts stderr "SEED_OFFER $seed_accepted $i $tmp_score"
+                    puts stderr "SEED_OFFER $seed_next $swarm(seed_accepted_${seed_cv}) $i $tmp_score"
                     SArray::add scores $i $tmp_score
                 }
-                SArray::sort scores "value" "-real"
+                
+                #Function depended sorting
+                if {$seed_opt == "min"} {
+                    SArray::sort scores "value" "-real -increasing"
+                } else {
+                    SArray::sort scores "value" "-real -decreasing"
+                }
                 set tmp_best [SArray::first scores]
 
                 #Decide if we have a new best scoring structure (or first cycle)
                 set rused {}
-                if {$seed_accepted == 1 || [lindex $seed_best 1] > [lindex $tmp_best 1]} {
-                    incr seed_successful
-                    set seed_best $tmp_best
-                    set seed_rep [lindex $seed_best 0]
-                    puts stderr "NEW_SEED $seed_accepted [lindex $seed_best 0] [lindex $seed_best 1]"
+                if {$swarm(seed_accepted_${seed_cv}) == 1 || [eval swarm_opt_$seed_opt [lindex $swarm(seed_best_${seed_cv}) 1] [lindex $tmp_best 1]]} {
+                    incr swarm(seed_successful_${seed_cv})
+                    set swarm(seed_best_${seed_cv}) $tmp_best
+                    set seed_rep [lindex $swarm(seed_best_${seed_cv}) 0]
+                    puts stderr "NEW_SEED $seed_next $swarm(seed_accepted_${seed_cv}) [lindex $swarm(seed_best_${seed_cv}) 0] [lindex $swarm(seed_best_${seed_cv}) 1]"
                     
-                    #save this current structure coordinates to assemble path trajectory?
-                    file copy -force [format "$output_root.offer.$seed_rep.coor" ""] [format "$output_root.swarm.$seed_successful.coor" ""]
-                    
+                    #save this current structure coordinates to assemble path trajectories
+                    file copy -force [format "$output_root.offer.$seed_rep.coor" ""] [format "$output_root.swarm.$seed_next.$swarm(seed_successful_${seed_cv}).coor" ""]
+                    file copy -force [format "$output_root.offer.$seed_rep.coor" ""] [format "$output_root.swarm.path.$seed_path.coor" ""]
+                                        
                     #Seeding randomly chosen replicas
                     for {set i 0} {$i < $swarmseedreps} {incr i} {
                         set rid [rselect $num_replicas $rused]
                         lappend rused $rid
                         
-                        puts "Info: SWARM - SEEDING REPLICA $rid FROM $seed_rep"
+                        puts "Info: SWARM - $seed_caption - SEEDING REPLICA $rid FROM $seed_rep"
                         
                         #send the replica id to seed from
                         if {$rid != $replica_id} {
@@ -1218,14 +1285,14 @@ while {$i_run < $num_runs} {
                         }
                     }  
                 } else {
-                    puts stderr "OLD_SEED $seed_accepted [lindex $seed_best 0] [lindex $seed_best 1]"
+                    puts stderr "OLD_SEED $seed_next $swarm(seed_accepted_${seed_cv}) [lindex $swarm(seed_best_${seed_cv}) 0] [lindex $swarm(seed_best_${seed_cv}) 1]"
                 }
                 
                 #Maintain a structure pool?
                 if {$swarmpoolsize} {
                     #Populate structure pool each cycle until full
-                    if {[SArray::count swarm_pool] < $swarmpoolsize} {
-                        puts "Info: SWARM - STRUCTURE POOL POPULATION PHASE"
+                    if {[SArray::count swarm_pool_${seed_cv}] < $swarmpoolsize} {
+                        puts "Info: SWARM - $seed_caption - STRUCTURE POOL POPULATION PHASE"
                     
                         set seed_ids    [SArray::keys   scores]
                         set seed_scores [SArray::values scores]
@@ -1233,40 +1300,46 @@ while {$i_run < $num_runs} {
                         foreach key $seed_ids value $seed_scores {
 
                             #copy files into pool if diverse enough
-                            set pool_scores [SArray::values swarm_pool]
+                            set pool_scores [SArray::values swarm_pool_${seed_cv}]
                             if {[is_diverse $value $pool_scores $swarmpooldiversity]} {                                                              
 
-                                set pool_id [SArray::count swarm_pool]
+                                set pool_id [SArray::count swarm_pool_${seed_cv}]
                                                             
-                                file copy -force [format "$output_root.offer.$key.coor" ""] "$pool_output_root/$pool_id.coor"
-                                file copy -force [format "$output_root.offer.$key.vel"  ""] "$pool_output_root/$pool_id.vel" 
-                                file copy -force [format "$output_root.offer.$key.xsc"  ""] "$pool_output_root/$pool_id.xsc"
+                                file copy -force [format "$output_root.offer.$key.coor" ""] "$pool_output_root/$seed_next.$pool_id.coor"
+                                file copy -force [format "$output_root.offer.$key.vel"  ""] "$pool_output_root/$seed_next.$pool_id.vel" 
+                                file copy -force [format "$output_root.offer.$key.xsc"  ""] "$pool_output_root/$seed_next.$pool_id.xsc"
                                 
                                 #pool book keeping
-                                SArray::add swarm_pool $pool_id $value
+                                SArray::add swarm_pool_${seed_cv} $pool_id $value
                                 
-                                puts "Info: SWARM - POOL STRUCTURE $pool_id ADDED    - REPLICA $key WITH SCORE $value"
+                                puts "Info: SWARM - $seed_caption - POOL STRUCTURE $pool_id ADDED    - REPLICA $key WITH SCORE $value"
                             }
                         }
                     } else {
                         #Override worst structures in pool if we have better ones here?
-                        puts "Info: SWARM - STRUCTURE POOL MAINTENANCE PHASE"
+                        puts "Info: SWARM - $seed_caption - STRUCTURE POOL MAINTENANCE PHASE"
                         
                         #get N=$swarmpoolreps best seed offers this cycle
                         set seed_ids    [SArray::keys   scores]
                         set seed_scores [SArray::values scores]
                         
                         #sort the pool scores bad->good so replace the worst ones first
-                        SArray::sort swarm_pool "value" "-real -decreasing"
+                        #Function depended sorting
+                        if {$seed_opt == "min"} {
+                            SArray::sort swarm_pool_${seed_cv} "value" "-real -decreasing"
+                        } else {
+                            SArray::sort swarm_pool_${seed_cv} "value" "-real -increasing"
+                        }
+                        
                         foreach key $seed_ids value $seed_scores {
                             #find a pool_id to replace with worse score
                             set pool_id -1
-                            set pool_scores [SArray::values swarm_pool]
+                            set pool_scores [SArray::values swarm_pool_${seed_cv}]
                             set i 0
                             foreach pool_score $pool_scores {
                                 #Check if better & we dont already have a too similar structure
-                                if {$pool_score > $value && [is_diverse $value $pool_scores $swarmpooldiversity]} {                                                              
-                                    set pool_id [lindex [SArray::keys swarm_pool] $i]
+                                if {[eval swarm_opt_$seed_opt $pool_score $value] && [is_diverse $value $pool_scores $swarmpooldiversity]} {                                                              
+                                    set pool_id [lindex [SArray::keys swarm_pool_${seed_cv}] $i]
                                     break;
                                 }
                                 incr i
@@ -1274,29 +1347,29 @@ while {$i_run < $num_runs} {
                             
                             #copy files into pool
                             if {$pool_id != -1} {
-                                file copy -force [format "$output_root.offer.$key.coor" ""] "$pool_output_root/$pool_id.coor"
-                                file copy -force [format "$output_root.offer.$key.vel"  ""] "$pool_output_root/$pool_id.vel" 
-                                file copy -force [format "$output_root.offer.$key.xsc"  ""] "$pool_output_root/$pool_id.xsc"
+                                file copy -force [format "$output_root.offer.$key.coor" ""] "$pool_output_root/$seed_next.$pool_id.coor"
+                                file copy -force [format "$output_root.offer.$key.vel"  ""] "$pool_output_root/$seed_next.$pool_id.vel" 
+                                file copy -force [format "$output_root.offer.$key.xsc"  ""] "$pool_output_root/$seed_next.$pool_id.xsc"
                                 
                                 #pool book keeping
-                                SArray::add swarm_pool $pool_id $value
+                                SArray::add swarm_pool_${seed_cv} $pool_id $value
                                 
-                                puts "Info: SWARM - POOL STRUCTURE $pool_id REPLACED - REPLICA $key WITH SCORE $value < $pool_score"
+                                puts "Info: SWARM - $seed_caption - POOL STRUCTURE $pool_id REPLACED - REPLICA $key WITH SCORE $value < $pool_score"
                             }
                         }
                         
                         #Seed randomly selected replicas with randomly selected pool structure
                         #Anti-proportional to success_rate of seeding cycles -> escape stagnation
-                        set pool_do [expr 1.-$seed_prob > rand() ? 1 : 0]
+                        set pool_do [expr 1.-$swarm(seed_prob_${seed_cv}) > rand() ? 1 : 0]
                         if {$pool_do} {
-                            puts "Info: SWARM - SEEDING FROM STRUCTURE POOL"
+                            puts "Info: SWARM - $seed_caption - SEEDING FROM STRUCTURE POOL"
                             for {set i 0} {$i < $swarmpoolreps} {incr i} {
                                 set rid [rselect $num_replicas $rused]
                                 lappend rused $rid
                                 
                                 set pool_id [rselect $swarmpoolsize {}]
                                 
-                                puts "Info: SWARM - SEEDING REPLICA $rid FROM POOL STRUCTURE $pool_id"
+                                puts "Info: SWARM - $seed_caption - SEEDING REPLICA $rid FROM POOL STRUCTURE $pool_id"
                                 
                                 #send the replica id to seed from
                                 if {$rid != $replica_id} {
@@ -1322,8 +1395,8 @@ while {$i_run < $num_runs} {
                 }
                 
                 #report progress ratio
-                set seed_prob [expr 1.0*$seed_successful/$seed_accepted]
-                puts stderr "SEED_PROGRESS $seed_successful $seed_accepted $seed_prob"
+                set swarm(seed_prob_${seed_cv}) [expr 1.0*$swarm(seed_successful_${seed_cv})/$swarm(seed_accepted_${seed_cv})]
+                puts stderr "SEED_PROGRESS $seed_next $swarm(seed_successful_${seed_cv}) $swarm(seed_accepted_${seed_cv}) $swarm(seed_prob_${seed_cv})"
                 
             } else {#worker replica branch
                 #send score to baseline
@@ -1354,7 +1427,7 @@ while {$i_run < $num_runs} {
                 puts "Info: SWARM - SEEDING FROM POOL STRUCTURE $pool_id"
                     
                 #get seeded
-                reinitatoms "$pool_output_root/$pool_id"
+                reinitatoms "$pool_output_root/$seed_next.$pool_id"
                 minimize 0; #del vels to diverge timelines
                 reinitvels [expr $min_temp/2.]; #reinitvels
                 
@@ -1386,11 +1459,16 @@ while {$i_run < $num_runs} {
             
             #SWARMING restart information
             if {$swarming} {
-                puts $rfile [list set seed_accepted $seed_accepted]
-                puts $rfile [list set seed_attempted $seed_attempted]
-                puts $rfile [list set seed_successful $seed_successful]
-                puts $rfile [list set seed_best $seed_best]
-                puts $rfile [list set swarm_pool_import [SArray::export swarm_pool]]
+                puts $rfile [list set seed_next $seed_next]
+                puts $rfile [list set seed_path $seed_path]
+                puts $rfile [list array set swarm [array get swarm]]
+                
+                #collect import info in a list
+                set swarm_pool_import {}
+                foreach seed_cv [array names swarm_colvars] {
+                    lappend swarm_pool_import [SArray::export swarm_pool_${seed_cv}]
+                }
+                puts $rfile [list set swarm_pool_import $swarm_pool_import]
             }
             
             close $rfile
