@@ -992,7 +992,7 @@ if {[info exists swarmcycle] && $swarmcycle > 0} {
             set swarm(seed_accepted_$seed_cv)   0
             set swarm(seed_attempted_$seed_cv)  0
             set swarm(seed_prob_$seed_cv)       1
-            set swarm(seed_successful_$seed_cv) 1
+            set swarm(seed_successful_$seed_cv) 0
             set swarm(seed_best_$seed_cv)      -1
             
             SArray::new swarm_pool_${seed_cv}
@@ -1260,7 +1260,7 @@ while {$i_run < $num_runs} {
 
                 #Decide if we have a new best scoring structure (or first cycle)
                 set rused {}
-                if {$swarm(seed_accepted_${seed_cv}) == 1 || [eval swarm_opt_$seed_opt [lindex $swarm(seed_best_${seed_cv}) 1] [lindex $tmp_best 1]]} {
+                if {$swarm(seed_accepted_${seed_cv}) == 1 || [eval swarm_opt_$seed_opt [lindex $tmp_best 1] [lindex $swarm(seed_best_${seed_cv}) 1]]} {
                     incr swarm(seed_successful_${seed_cv})
                     set swarm(seed_best_${seed_cv}) $tmp_best
                     set seed_rep [lindex $swarm(seed_best_${seed_cv}) 0]
@@ -1338,7 +1338,7 @@ while {$i_run < $num_runs} {
                             set i 0
                             foreach pool_score $pool_scores {
                                 #Check if better & we dont already have a too similar structure
-                                if {[eval swarm_opt_$seed_opt $pool_score $value] && [is_diverse $value $pool_scores $swarmpooldiversity]} {                                                              
+                                if {[eval swarm_opt_$seed_opt $value $pool_score] && [is_diverse $value $pool_scores $swarmpooldiversity]} {                                                              
                                     set pool_id [lindex [SArray::keys swarm_pool_${seed_cv}] $i]
                                     break;
                                 }
@@ -1354,7 +1354,7 @@ while {$i_run < $num_runs} {
                                 #pool book keeping
                                 SArray::add swarm_pool_${seed_cv} $pool_id $value
                                 
-                                puts "Info: SWARM - $seed_caption - POOL STRUCTURE $pool_id REPLACED - REPLICA $key WITH SCORE $value < $pool_score"
+                                puts "Info: SWARM - $seed_caption - POOL STRUCTURE $pool_id REPLACED - REPLICA $key WITH SCORE $value SUPERIOR $pool_score"
                             }
                         }
                         
