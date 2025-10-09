@@ -792,7 +792,7 @@ proc is_diverse {value valuelist threshold} {
         return 1  ;# Always accept if pool is small
     }
 
-    # Use lsort to find min and max
+    # find min and max
     set sorted [lsort -real $valuelist]
     set min_val [lindex $sorted 0]
     set max_val [lindex $sorted end]
