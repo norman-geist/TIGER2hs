@@ -871,8 +871,11 @@ if {$i_run} { #restart
 source $namd_config_file
 
 #enable colvars
-colvars         on
-colvarsConfig   $colvar_config_file
+if {[info exists colvar_config_file]} {
+    puts "Info: TIGER2hsPE - COLVARS ENABLED (colvar_config_file=$colvar_config_file)"
+    colvars         on
+    colvarsConfig   $colvar_config_file
+}
 #####################################################
 
 ### INITIALIZE ON DEMAND FRAME OUTPUT ###
