@@ -1260,7 +1260,7 @@ while {$i_run < $num_runs} {
                     set score [lindex $this_scores $seed_next]
                     
                     puts stderr "SEED_OFFER $seed_next $swarm(seed_accepted_${seed_cv}) $i $score"
-                    SArray::add scores $i $tmp_score
+                    SArray::add scores $i $score
                 }
                 
                 #Function depended sorting
