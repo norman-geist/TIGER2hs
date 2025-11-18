@@ -1326,10 +1326,8 @@ while {$i_run < $num_runs} {
                         
                         foreach key $seed_ids value $seed_scores {
 
-                            #copy files into pool if diverse enough
-                            set pool_scores [SArray::values swarm_pool_${seed_cv}]
-                            if {[is_diverse $value $pool_scores $swarmpooldiversity]} {
-
+                            #copy files into pool
+                            if {[SArray::count swarm_pool_${seed_cv}] < $swarmpoolsize} {
                                 set pool_id [SArray::count swarm_pool_${seed_cv}]
                                                             
                                 file copy -force [format "$output_root.offer.$key.coor" ""] "$pool_output_root/$pool_id.coor"
