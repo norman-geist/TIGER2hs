@@ -1281,16 +1281,19 @@ while {$i_run < $num_runs} {
                 if {$swarm(seed_accepted_${seed_cv}) == 1 || [eval swarm_opt_$seed_opt [lindex $tmp_best 1] [lindex $swarm(seed_best_${seed_cv}) 1]]} {
                     incr swarm(seed_successful_${seed_cv})
                     
+                    
                     #Register new best state globally across all CVs to allow resets in other CVs in multi-CV context
+                    set seed_rep [lindex $tmp_best 0]
                     if {$swarmpermitresets} {
+                        set i 0
                         foreach iterate_seed_cv [array names swarm_colvars] {
-                            set swarm(seed_best_${iterate_seed_cv}) $tmp_best
+                            set swarm(seed_best_${iterate_seed_cv}) [list $seed_rep [lindex [lindex $replica_scores_collected $seed_rep] $i]]
+                            incr i
                         }
                     } else {
                         set swarm(seed_best_${seed_cv}) $tmp_best
                     }
 
-                    set seed_rep [lindex $swarm(seed_best_${seed_cv}) 0]
                     puts stderr "NEW_SEED $seed_next $swarm(seed_accepted_${seed_cv}) [lindex $swarm(seed_best_${seed_cv}) 0] [lindex $swarm(seed_best_${seed_cv}) 1]"
                     
                     #save this current structure coordinates to assemble path trajectories
@@ -1326,8 +1329,9 @@ while {$i_run < $num_runs} {
                         
                         foreach key $seed_ids value $seed_scores {
 
-                            #copy files into pool
-                            if {[SArray::count swarm_pool_${seed_cv}] < $swarmpoolsize} {
+                            #copy files into pool if diverse and not full
+                            set pool_scores [SArray::values swarm_pool_${seed_cv}]
+                            if {[SArray::count swarm_pool_${seed_cv}] < $swarmpoolsize && [is_diverse $value $pool_scores $swarmpooldiversity]} {
                                 set pool_id [SArray::count swarm_pool_${seed_cv}]
                                                             
                                 file copy -force [format "$output_root.offer.$key.coor" ""] "$pool_output_root/$pool_id.coor"
@@ -1335,8 +1339,10 @@ while {$i_run < $num_runs} {
                                 file copy -force [format "$output_root.offer.$key.xsc"  ""] "$pool_output_root/$pool_id.xsc"
                                 
                                 #pool book keeping (add too all CVs)  !!!
+                                set i 0
                                 foreach iterate_seed_cv [array names swarm_colvars] {
-                                    SArray::add swarm_pool_${iterate_seed_cv} $pool_id [lindex [lindex $replica_scores_collected $key] $seed_next]
+                                    SArray::add swarm_pool_${iterate_seed_cv} $pool_id [lindex [lindex $replica_scores_collected $key] $i]
+                                    incr i
                                 }
                                 
                                 puts "Info: SWARM - $seed_caption - POOL STRUCTURE $pool_id ADDED    - REPLICA $key WITH SCORE $value"
@@ -1379,8 +1385,10 @@ while {$i_run < $num_runs} {
                                 file copy -force [format "$output_root.offer.$key.xsc"  ""] "$pool_output_root/$pool_id.xsc"
                                 
                                 #pool book keeping (add too all CVs)  !!!
+                                set i 0
                                 foreach iterate_seed_cv [array names swarm_colvars] {
-                                    SArray::add swarm_pool_${iterate_seed_cv} $pool_id [lindex [lindex $replica_scores_collected $key] $seed_next]
+                                    SArray::add swarm_pool_${iterate_seed_cv} $pool_id [lindex [lindex $replica_scores_collected $key] $i]
+                                    incr i
                                 }
                                 
                                 puts "Info: SWARM - $seed_caption - POOL STRUCTURE $pool_id REPLACED - REPLICA $key WITH SCORE $value SUPERIOR $pool_score"
