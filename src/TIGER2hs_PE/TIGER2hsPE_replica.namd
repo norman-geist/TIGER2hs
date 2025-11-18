@@ -956,6 +956,11 @@ if {[info exists swarmcycle] && $swarmcycle > 0} {
         puts "Info: SWARM - REGISTERED CV $seed_cv WITH FUNCTION ${seed_opt}()"
     }
     
+    #Resets in multi-CV?
+    if {$swarmpermitresets} {
+        puts "Info: SWARM - GLOBAL RESETS ACROSS CVS"
+    }
+    
     #Sanity checks
     if {[expr $swarmseedreps+$swarmpoolreps] < 1} {
       error "need at least one seed or pool replica to do anything"
@@ -1275,7 +1280,16 @@ while {$i_run < $num_runs} {
                 set rused {}
                 if {$swarm(seed_accepted_${seed_cv}) == 1 || [eval swarm_opt_$seed_opt [lindex $tmp_best 1] [lindex $swarm(seed_best_${seed_cv}) 1]]} {
                     incr swarm(seed_successful_${seed_cv})
-                    set swarm(seed_best_${seed_cv}) $tmp_best
+                    
+                    #Register new best state globally across all CVs to allow resets in other CVs in multi-CV context
+                    if {$swarmpermitresets} {
+                        foreach iterate_seed_cv [array names swarm_colvars] {
+                            set swarm(seed_best_${iterate_seed_cv}) $tmp_best
+                        }
+                    } else {
+                        set swarm(seed_best_${seed_cv}) $tmp_best
+                    }
+
                     set seed_rep [lindex $swarm(seed_best_${seed_cv}) 0]
                     puts stderr "NEW_SEED $seed_next $swarm(seed_accepted_${seed_cv}) [lindex $swarm(seed_best_${seed_cv}) 0] [lindex $swarm(seed_best_${seed_cv}) 1]"
                     
