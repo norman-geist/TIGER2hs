@@ -754,7 +754,7 @@ namespace eval SArray {
     }
 }
 
-#Unpack colvars and optmization functions
+#Unpack colvars and optimization functions
 proc parse_swarm_colvars {cv_config} {
 
     array set swarm_colvars {}
@@ -777,12 +777,46 @@ proc parse_swarm_colvars {cv_config} {
     return [array get swarm_colvars]
 }
 
+#Unpack colvars and cutoff limits
+proc parse_swarm_limits {limit_config} {
+    array set swarm_limits {}
+
+    set limit_config [string trim $limit_config]
+    set raw [split $limit_config ,]
+    
+    # regex validating and capturing name and limit
+    set pattern {^([a-zA-Z_][a-zA-Z0-9_]*)=([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)$}
+
+    foreach tmp $raw {
+        set tmp [string trim $tmp]
+        if {$tmp eq ""} {
+            continue
+        }
+
+        if {[regexp $pattern $tmp -> name limit]} {
+            set swarm_limits($name) $limit
+        } else {
+            error "Invalid limit structure (expected colvarname=limit): \"$tmp\""
+        }
+    }
+
+    return [array get swarm_limits]
+}
+
 #Optimization functions
 proc swarm_opt_min {val1 val2} {
     return [expr $val1 < $val2]
 }
 proc swarm_opt_max {val1 val2} {
     return [expr $val1 > $val2]
+}
+
+#Limit helper functions
+proc swarm_limit_min {val lim} {
+    return [expr $val <= $lim]
+}
+proc swarm_limit_max {val lim} {
+    return [expr $val >= $lim]
 }
 
 #check diversity of values against a list using a relative threshold on the value range
@@ -951,9 +985,15 @@ if {[info exists swarmcycle] && $swarmcycle > 0} {
     #Unpack and check SWARM COLVARS
     puts "Info: SWARM - CONFIGURING ROUND-ROBIN SCHEME FOR MULTIPLE CV OPTIMIZATION"
     array set swarm_colvars [parse_swarm_colvars $swarmcolvar]
+    array set swarm_limits  [parse_swarm_limits  $swarmlimits]
     
     foreach {seed_cv seed_opt} [array get swarm_colvars] {
-        puts "Info: SWARM - REGISTERED CV $seed_cv WITH FUNCTION ${seed_opt}()"
+        #limits?
+        if {[info exists swarm_limits($seed_cv)]} {
+            puts "Info: SWARM - REGISTERED CV $seed_cv WITH FUNCTION ${seed_opt}() LIMIT $swarm_limits($seed_cv)"
+        } else {
+            puts "Info: SWARM - REGISTERED CV $seed_cv WITH FUNCTION ${seed_opt}()"
+        }
     }
     
     #Resets in multi-CV?
@@ -1220,11 +1260,34 @@ while {$i_run < $num_runs} {
                     set seed_do 1
                 }
                 
+                #Check whether limits of this CV are already met
+                if {[info exists swarm_limits($seed_cv)]} {
+                    #check own value
+                    set i [eval swarm_limit_$seed_opt [cv colvar $seed_cv value] $swarm_limits($seed_cv)]
+                    
+                    #sum up workers
+                    for {set k 1} {$k < $num_replicas} {incr k} {
+                        incr i [replicaRecv $k]
+                    }   
+                    
+                    #is the sum == num workers? the CV is satisfied and omitted
+                    if {$i >= $num_replicas} {
+                        puts stderr "SWARM_LIMITS $seed_next ALL SATISFIED"
+                        set seed_do 0
+                    }
+                }
+                
                 #distribute if we swarm or not    
                 for {set k 1} {$k < $num_replicas} {incr k} {
                     replicaSend $seed_do $k
                 }
             } else {
+                #send if limit is reached
+                if {[info exists swarm_limits($seed_cv)]} {
+                    replicaSend [eval swarm_limit_$seed_opt [cv colvar $seed_cv value] $swarm_limits($seed_cv)] 0
+                }
+            
+                #recieve if we swarm or not
                 set seed_do [replicaRecv 0]
             }
         }
@@ -1238,7 +1301,7 @@ while {$i_run < $num_runs} {
             
             puts "Info: SWARM - $seed_caption - CYCLE $swarm(seed_accepted_${seed_cv})"
             
-            #Collect COLVAR scores for all CVs (pool book keeping in multi colvar)
+            #Collect COLVAR scores for all CVs (book keeping in multi colvar)
             set this_scores {}
             foreach iterate_seed_cv [array names swarm_colvars] {
                 lappend this_scores [cv colvar $iterate_seed_cv value]
@@ -1281,13 +1344,15 @@ while {$i_run < $num_runs} {
                 if {$swarm(seed_accepted_${seed_cv}) == 1 || [eval swarm_opt_$seed_opt [lindex $tmp_best 1] [lindex $swarm(seed_best_${seed_cv}) 1]]} {
                     incr swarm(seed_successful_${seed_cv})
                     
-                    
                     #Register new best state globally across all CVs to allow resets in other CVs in multi-CV context
                     set seed_rep [lindex $tmp_best 0]
                     if {$swarmpermitresets} {
                         set i 0
                         foreach iterate_seed_cv [array names swarm_colvars] {
-                            set swarm(seed_best_${iterate_seed_cv}) [list $seed_rep [lindex [lindex $replica_scores_collected $seed_rep] $i]]
+                            #allow resets only if current CV has better progress than the one to be reset (<-- make probabilistic?)
+                            if {${seed_cv} == ${iterate_seed_cv} || $swarm(seed_prob_${seed_cv}) > $swarm(seed_prob_${iterate_seed_cv})} {
+                                set swarm(seed_best_${iterate_seed_cv}) [list $seed_rep [lindex [lindex $replica_scores_collected $seed_rep] $i]]
+                            }
                             incr i
                         }
                     } else {
@@ -1338,7 +1403,7 @@ while {$i_run < $num_runs} {
                                 file copy -force [format "$output_root.offer.$key.vel"  ""] "$pool_output_root/$pool_id.vel" 
                                 file copy -force [format "$output_root.offer.$key.xsc"  ""] "$pool_output_root/$pool_id.xsc"
                                 
-                                #pool book keeping (add too all CVs)  !!!
+                                #book keeping in multi CV (add too all CVs)  !!!
                                 set i 0
                                 foreach iterate_seed_cv [array names swarm_colvars] {
                                     SArray::add swarm_pool_${iterate_seed_cv} $pool_id [lindex [lindex $replica_scores_collected $key] $i]
@@ -1356,7 +1421,7 @@ while {$i_run < $num_runs} {
                         set seed_ids    [SArray::keys   scores]
                         set seed_scores [SArray::values scores]
                         
-                        #sort the pool scores bad->good so replace the worst ones first
+                        #sort the pool scores bad->good so replace the worst ones first (obvious point to adress if multi-CV doesnt work)
                         #Function depended sorting
                         if {$seed_opt == "min"} {
                             SArray::sort swarm_pool_${seed_cv} "value" "-real -decreasing"
@@ -1384,7 +1449,7 @@ while {$i_run < $num_runs} {
                                 file copy -force [format "$output_root.offer.$key.vel"  ""] "$pool_output_root/$pool_id.vel" 
                                 file copy -force [format "$output_root.offer.$key.xsc"  ""] "$pool_output_root/$pool_id.xsc"
                                 
-                                #pool book keeping (add too all CVs)  !!!
+                                #book keeping in multi CV (add too all CVs)  !!!
                                 set i 0
                                 foreach iterate_seed_cv [array names swarm_colvars] {
                                     SArray::add swarm_pool_${iterate_seed_cv} $pool_id [lindex [lindex $replica_scores_collected $key] $i]
