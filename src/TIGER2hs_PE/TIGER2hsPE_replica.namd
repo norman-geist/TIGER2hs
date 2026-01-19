@@ -1464,8 +1464,13 @@ while {$i_run < $num_runs} {
                         #Anti-proportional to success_rate of seeding cycles -> escape stagnation
                         set pool_do [expr 1.-$swarm(seed_prob_${seed_cv}) > rand() ? 1 : 0]
                         if {$pool_do} {
-                            puts "Info: SWARM - $seed_caption - SEEDING FROM STRUCTURE POOL"
-                            for {set i 0} {$i < $swarmpoolreps} {incr i} {
+                            #calculate remaining slots after seeding
+                            set rem $num_replicas-[llength $rused]
+                            set slots [expr $swarmpoolreps < $rem ? $swarmpoolreps : $rem]
+                            
+                            puts "Info: SWARM - $seed_caption - SEEDING FROM STRUCTURE POOL ($slots SLOTS)"
+                            
+                            for {set i 0} {$i < $slots} {incr i} {
                                 set rid [rselect $num_replicas $rused]
                                 lappend rused $rid
                                 
