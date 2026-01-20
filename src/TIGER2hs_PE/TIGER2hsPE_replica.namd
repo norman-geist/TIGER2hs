@@ -985,7 +985,7 @@ if {[info exists swarmcycle] && $swarmcycle > 0} {
     #Unpack and check SWARM COLVARS
     puts "Info: SWARM - CONFIGURING ROUND-ROBIN SCHEME FOR MULTIPLE CV OPTIMIZATION"
     array set swarm_colvars [parse_swarm_colvars $swarmcolvar]
-    array set swarm_limits  [parse_swarm_limits  $swarmlimits]
+    array set swarm_limits  [parse_swarm_limits  $swarmlimit]
     
     foreach {seed_cv seed_opt} [array get swarm_colvars] {
         #limits?
@@ -995,6 +995,7 @@ if {[info exists swarmcycle] && $swarmcycle > 0} {
             puts "Info: SWARM - REGISTERED CV $seed_cv WITH FUNCTION ${seed_opt}()"
         }
     }
+    puts "Info: SWARM - LIMIT THRESHOLD $swarmlimitthreshold"
     
     #Resets in multi-CV?
     if {$swarmpermitresets} {
@@ -1270,9 +1271,9 @@ while {$i_run < $num_runs} {
                         incr i [replicaRecv $k]
                     }   
                     
-                    #is the sum == num workers? the CV is satisfied and omitted
-                    if {$i >= $num_replicas} {
-                        puts stderr "SWARM_LIMITS $seed_next ALL SATISFIED"
+                    #is the sum > threshold? the CV is satisfied and omitted
+                    if {$i >= $swarmlimitthreshold} {
+                        puts stderr "SWARM_LIMITS $seed_next SATISFIED"
                         set seed_do 0
                     }
                 }

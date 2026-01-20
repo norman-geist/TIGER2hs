@@ -25,6 +25,18 @@ ommsuff=""                              #command suffix for OpenMM call
 minruns="1"							    #perform a minimization of this number of runs before REMD
 numruns="500000"                        #number of runs
 runsperrestart="10"                     #number of runs between writing restart files
+#-
+swarmseedreps="4"                       #Replicas to be seeded with current best state
+swarmpoolreps="2"                       #Replicas to be seeded from structure pool
+swarmpoolsize="16"                      #Size of structure pool of previous best states
+swarmpooldiversity="0.05"               #Percent diversity threshold to add states to the pool
+swarmcycle="1"                          #Number of TIGER runs between swarm cycles
+swarmdynamic="1"                        #Increase swarmcycle based on success rate of finding better structures
+swarmcolvar="min(test),max(test2)"      #Name of colvars to overwatch (min(name) or max(name)) seperated by ","
+swarmlimit="test=32"                    #Hard capping of upper/lower limit in colvar colvar=limit seperated by ","
+swarmlimitthreshold="0.5"               #Fraction of replicas required to reach limit before CV is skipped
+swarmpermitresets="1"                   #New best states in one CV override in other CVs too (reasonable in multi-CV)
+#-
 CellX="<INPUT>"							#Cell dimensions 0
 CellY="<INPUT>"
 CellZ="<INPUT>"
@@ -136,6 +148,16 @@ set ommpre "${ommpre}"
 set ommsuff "${ommsuff}"
 set num_runs ${numruns}
 set runs_per_restart ${runsperrestart}
+set swarmseedreps ${swarmseedreps}
+set swarmpoolreps ${swarmpoolreps}
+set swarmpoolsize ${swarmpoolsize}
+set swarmpooldiversity ${swarmpooldiversity}
+set swarmcycle ${swarmcycle}
+set swarmdynamic ${swarmdynamic}
+set swarmcolvar "${swarmcolvar}"
+set swarmlimit "${swarmlimit}"
+set swarmlimitthreshold "${swarmlimitthreshold}"
+set swarmpermitresets $swarmpermitresets
 set namd_config_file "${jobname}_base.namd"
 set output_root "output/%s/${jobname}"
 set remdpressuregen ${remdpressuregen}
