@@ -1273,7 +1273,7 @@ while {$i_run < $num_runs} {
                     
                     #is the fraction > threshold? the CV is satisfied and omitted
                     if {[expr 1.*$i/$num_replicas] >= $swarmlimitthreshold} {
-                        puts stderr "SWARM_LIMITS $seed_next SATISFIED"
+                        puts stderr "SWARM_LIMITS $seed_next SATISFIED RUN $i_run"
                         set seed_do 0
                     }
                 }
