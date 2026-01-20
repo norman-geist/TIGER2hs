@@ -1271,8 +1271,8 @@ while {$i_run < $num_runs} {
                         incr i [replicaRecv $k]
                     }   
                     
-                    #is the sum > threshold? the CV is satisfied and omitted
-                    if {$i >= $swarmlimitthreshold} {
+                    #is the fraction > threshold? the CV is satisfied and omitted
+                    if {[expr $i/$num_replicas] >= $swarmlimitthreshold} {
                         puts stderr "SWARM_LIMITS $seed_next SATISFIED"
                         set seed_do 0
                     }
