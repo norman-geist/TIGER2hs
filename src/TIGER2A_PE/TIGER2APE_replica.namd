@@ -418,7 +418,7 @@ while {$i_run < $num_runs} {
             set temp2 [replica_temp $replica(RankByTemp.$rid)]
             
             #exclude temp > temp2
-            if {$temp >= $temp2} {
+            if {$temp > $temp2} {
                 continue
             }
             
