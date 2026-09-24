@@ -1,0 +1,38 @@
+puts -nonewline "Output folder (default: path): "
+flush stdout
+gets stdin prefix
+if {[string trim $prefix] eq ""} {
+    set prefix "path"
+}
+file mkdir $prefix
+
+puts -nonewline "Stride (default: 1): "
+flush stdout
+gets stdin stride
+if {[string trim $stride] eq ""} {
+    set stride 1
+}
+
+set everyone [atomselect top all]
+set frames [molinfo top get numframes]
+set p 0
+for {set i 0} {$i < $frames} {incr i $stride} {
+   puts "Info) Processing Frame $i/$frames"
+
+   $everyone frame $i
+   animate goto $i
+
+   #save coords
+   $everyone writepdb "$prefix/milestone_${p}.coor"
+
+   #use coords as fake vels
+   file copy -force "$prefix/milestone_${p}.coor" "$prefix/milestone_${p}.vel"
+
+   #extended system information
+   pbc writexst "$prefix/milestone_${p}.xsc" -now
+
+   incr p
+}
+$everyone delete
+
+puts "Info) Done!"

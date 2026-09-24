@@ -75,6 +75,38 @@ proc rselect {num_reps exclude_ids} {
     return $svar
 }
 
+proc rselect_milestone {weights} {
+    set milestone ""
+    set tmp_best Inf
+    
+    array set shootings $weights
+
+    foreach i [array names shootings] {
+        set weight [expr {1.0 / ($shootings($i) + 1.0)}]
+
+        # Exclude zero to keep log(u) defined.
+        set u 0.0
+        while {$u <= 0.0} {
+            set u [expr {rand()}]
+        }
+
+        set key [expr {-log($u) / $weight}]
+
+        if {$key < $tmp_best} {
+            set tmp_best $key
+            set milestone $i
+        }
+    }
+
+    return $milestone
+}
+
+proc replica_temp { i } {
+    global num_replicas min_temp max_temp
+    return [format "%.2f" [expr ($min_temp * \
+            exp( log(1.0*$max_temp/$min_temp)*(1.0*$i/($num_replicas-1)) ) )]]
+}
+
 proc readxsc {xsc} {
     #read input xsc
     set fp [open "$xsc" r]
@@ -870,12 +902,171 @@ if {[info exists remdpressuregen]} {
 #####################################################
 
 #PROCS ##############################################
-proc replica_temp { i } {
-    global num_replicas min_temp max_temp
-    return [format "%.2f" [expr ($min_temp * \
-            exp( log(1.0*$max_temp/$min_temp)*(1.0*$i/($num_replicas-1)) ) )]]
-}
+
 #####################################################
+
+#enable continuous heating modification #############################
+set conheat 0
+if {[info exists tigerconheat] && $tigerconheat} {
+    puts "Info: TIGER2hsPE - ENABLED CONTINUOUS HEATING MODIFICATION"
+    set conheat 1
+}
+#####################################################################
+
+###### ENABLE SWARMING EXTENSION? ###################################
+set swarming 0
+if {[info exists swarmcycle] && $swarmcycle > 0} {
+    puts "Info: TIGER2hsPE - ENABLED SWARMING MODIFICATION"
+    set swarming 1
+
+    #Unpack and check SWARM COLVARS
+    puts "Info: SWARM - CONFIGURING ROUND-ROBIN SCHEME FOR MULTIPLE CV OPTIMIZATION"
+    array set swarm_colvars [parse_swarm_colvars $swarmcolvar]
+    array set swarm_limits  [parse_swarm_limits  $swarmlimit]
+
+    foreach {seed_cv seed_opt} [array get swarm_colvars] {
+        #limits?
+        if {[info exists swarm_limits($seed_cv)]} {
+            puts "Info: SWARM - REGISTERED CV $seed_cv WITH FUNCTION ${seed_opt}() LIMIT $swarm_limits($seed_cv)"
+        } else {
+            puts "Info: SWARM - REGISTERED CV $seed_cv WITH FUNCTION ${seed_opt}()"
+        }
+    }
+    puts "Info: SWARM - LIMIT THRESHOLD $swarmlimitthreshold"
+
+    #Resets in multi-CV?
+    if {$swarmpermitresets} {
+        puts "Info: SWARM - GLOBAL RESETS ACROSS CVS"
+    }
+
+    #Sanity checks
+    if {[expr $swarmseedreps+$swarmpoolreps] < 1} {
+      error "need at least one seed or pool replica to do anything"
+    }
+    if {$swarmdynamic} {
+        puts "Info: SWARM - USING DYNAMIC CYCLE LENGTHS BASED ON SEEDING PROGRESS"
+    } else {
+        puts "Info: SWARM - USING STATIC CYCLE LENGTHS ($swarmcycle)"
+    }
+    if {$swarmpoolsize > 0 && $swarmpoolreps < 1} {
+        puts "Warn: SWARM - DISABLING STRUCTURE POOL DUE TO ZERO POOL REPLICAS"
+        set swarmpoolsize 0
+    }
+
+    #Set up structure pool?
+    if {$swarmpoolsize > 0} {
+        set pool_output_root "swarm-pool"
+        if {![file exists $pool_output_root] && $replica_id == 0} {
+            puts "Info: SWARM - SETTING UP STRUCTURE POOL"
+            file mkdir $pool_output_root
+        } else {
+            puts "Warn: SWARM - USING EXISTING STRUCTURE POOL - BE CAUTIOUS"
+        }
+    }
+
+    if {[info exists restart_root]} { #restart
+        puts "Info: SWARM - RESTARTING FROM PREVIOUS JOB"
+        set i 0
+        foreach seed_cv [array names swarm_colvars] {
+            set swarm(seed_prob_${seed_cv}) [expr 1.0*$swarm(seed_successful_${seed_cv})/$swarm(seed_accepted_${seed_cv})]
+            SArray::import swarm_pool_${seed_cv} [lindex $swarm_pool_import $i]
+            incr i
+        }
+    } else {
+        #initialize counters and pool
+        foreach seed_cv [array names swarm_colvars] {
+            set swarm(seed_accepted_$seed_cv)   0
+            set swarm(seed_attempted_$seed_cv)  0
+            set swarm(seed_prob_$seed_cv)       1
+            set swarm(seed_successful_$seed_cv) 0
+            set swarm(seed_best_$seed_cv)      -1
+
+            SArray::new swarm_pool_${seed_cv}
+        }
+        set seed_next -1
+        set seed_path 0
+    }
+}
+#####################################################################
+
+###### ENABLE SHOOTING EXTENSION? ###################################
+set shooting 0
+if {[info exists shootingcycle] && $shootingcycle > 0} {
+    puts "Info: TIGER2hsPE - ENABLED SHOOTING MODIFICATION"
+    set shooting 1
+
+    #sanity checks
+    if {[expr $shootingbasereps+$shootingpathreps] < 2} {
+      error "need at least one path and base replica to do anything"
+    }
+
+    puts "Info: SHOOTING - USING STATIC CYCLE LENGTHS $shootingcycle"
+    puts "Info: SHOOTING - USING $shootingbasereps REPLICAS AT THE BASELINE"
+    puts "Info: SHOOTING - USING $shootingpathreps REPLICAS FOR INJECTIONS"
+
+    if {[info exists restart_root]} { #restart
+        puts "Info: SHOOTING - RESTARTING FROM PREVIOUS JOB"
+        
+        set num_milestones [array size milestones]
+        
+    } else {
+        #initialize counters
+        set shooting_cycle 0
+        array set shooting_frag {}
+        array set milestones    {}
+        array set shootings     {}
+
+        #scan for milestones
+        set num_milestones 0
+        set pattern  [string map {%i *}  $shootingmilestones]
+        set scanmask [string map {%i %d} $shootingmilestones]
+        foreach coor [glob -nocomplain -types f "${pattern}.coor"] {
+            set base [file rootname $coor]
+
+            if {[scan $base $scanmask index] != 1} {continue}
+            if {![file isfile "${base}.vel"] || ![file isfile "${base}.xsc"]} {
+                error "milestone with base $base incomplete"
+            }
+
+            #map file base to internal index
+            set milestones($num_milestones) $base
+            incr num_milestones
+        }
+
+        #sanity checks
+        if {$num_milestones < 2} {
+            error "need at least two milestone states to do anything"
+        }
+        puts "Info: SHOOTING - CONFIGURING $num_milestones MILESTONES"
+
+        #initialize shooting counters
+        for {set i 0} {$i < $num_milestones} {incr i} {
+            set shootings($i) 0
+        }
+    }
+    
+    #reset segment tracking (also after restart)
+    set shooting_frag($replica_id) 0
+    set shooting_frag($replica_id.interrupt) 0
+
+    #override original temperature assignment proc to keep multiple baselines
+    proc replica_temp { i } {
+        global num_replicas min_temp max_temp shootingbasereps
+
+        if {$i < $shootingbasereps} {
+            return [format "%.2f" $min_temp]
+        }
+
+        return [format "%.2f" [expr {
+            $min_temp * exp(
+                log(1.0 * $max_temp / $min_temp) *
+                (1.0 * ($i - $shootingbasereps + 1) /
+                ($num_replicas - $shootingbasereps))
+            )
+        }]]
+    }
+}
+#####################################################################
 
 ##### SIMULATION SETUP ##############################
 set job_output_root "$output_root.job$i_job"
@@ -969,89 +1160,6 @@ if {[info exists randruns]} {
 }
 ######################################
 
-#enable continuous heating modification
-set conheat 0
-if {[info exists tigerconheat] && $tigerconheat} {
-    puts "Info: TIGER2hsPE - ENABLED CONTINUOUS HEATING MODIFICATION"
-    set conheat 1
-}
-
-###### ENABLE SWARMING EXTENSION? ###################################
-set swarming 0
-if {[info exists swarmcycle] && $swarmcycle > 0} {
-    puts "Info: TIGER2hsPE - ENABLED SWARMING MODIFICATION"
-    set swarming 1
-    
-    #Unpack and check SWARM COLVARS
-    puts "Info: SWARM - CONFIGURING ROUND-ROBIN SCHEME FOR MULTIPLE CV OPTIMIZATION"
-    array set swarm_colvars [parse_swarm_colvars $swarmcolvar]
-    array set swarm_limits  [parse_swarm_limits  $swarmlimit]
-    
-    foreach {seed_cv seed_opt} [array get swarm_colvars] {
-        #limits?
-        if {[info exists swarm_limits($seed_cv)]} {
-            puts "Info: SWARM - REGISTERED CV $seed_cv WITH FUNCTION ${seed_opt}() LIMIT $swarm_limits($seed_cv)"
-        } else {
-            puts "Info: SWARM - REGISTERED CV $seed_cv WITH FUNCTION ${seed_opt}()"
-        }
-    }
-    puts "Info: SWARM - LIMIT THRESHOLD $swarmlimitthreshold"
-    
-    #Resets in multi-CV?
-    if {$swarmpermitresets} {
-        puts "Info: SWARM - GLOBAL RESETS ACROSS CVS"
-    }
-    
-    #Sanity checks
-    if {[expr $swarmseedreps+$swarmpoolreps] < 1} {
-      error "need at least one seed or pool replica to do anything"
-    }
-    if {$swarmdynamic} {
-        puts "Info: SWARM - USING DYNAMIC CYCLE LENGTHS BASED ON SEEDING PROGRESS"
-    } else {
-        puts "Info: SWARM - USING STATIC CYCLE LENGTHS"
-    }
-    if {$swarmpoolsize > 0 && $swarmpoolreps < 1} {
-        puts "Warn: SWARM - DISABLING STRUCTURE POOL DUE TO ZERO POOL REPLICAS"
-        set swarmpoolsize 0
-    }
-
-    #Set up structure pool?
-    if {$swarmpoolsize > 0} {
-        set pool_output_root "swarm-pool"
-        if {![file exists $pool_output_root] && $replica_id == 0} {
-            puts "Info: SWARM - SETTING UP STRUCTURE POOL"
-            file mkdir $pool_output_root
-        } else {
-            puts "Warn: SWARM - USING EXISTING STRUCTURE POOL - BE CAUTIOUS"
-        }
-    }
-
-    if {[info exists restart_root]} { #restart
-        puts "Info: SWARM - RESTARTING FROM PREVIOUS JOB"
-        set i 0
-        foreach seed_cv [array names swarm_colvars] {
-            set swarm(seed_prob_${seed_cv}) [expr 1.0*$swarm(seed_successful_${seed_cv})/$swarm(seed_accepted_${seed_cv})]
-            SArray::import swarm_pool_${seed_cv} [lindex $swarm_pool_import $i]
-            incr i
-        }
-    } else {
-        #initialize counters and pool
-        foreach seed_cv [array names swarm_colvars] {
-            set swarm(seed_accepted_$seed_cv)   0
-            set swarm(seed_attempted_$seed_cv)  0
-            set swarm(seed_prob_$seed_cv)       1
-            set swarm(seed_successful_$seed_cv) 0
-            set swarm(seed_best_$seed_cv)      -1
-            
-            SArray::new swarm_pool_${seed_cv}
-        }
-        set seed_next -1
-        set seed_path 0
-    } 
-}
-#####################################################################
-
 #multiexchange?
 puts "Info: TIGER2hsPE - PAIR-WISE GLOBAL RANDOM EXCHANGE"
 
@@ -1140,7 +1248,9 @@ while {$i_run < $num_runs} {
         
     } else {
         # let base temp replica write a frame prior to exchange
-        dcdframe
+        if {!$shooting} {
+            dcdframe
+        }
 
         #collect potential energies
         array unset RankByPot
@@ -1162,7 +1272,7 @@ while {$i_run < $num_runs} {
             set temp2 [replica_temp $replica(RankByTemp.$rid)]
             
             #exclude temp > temp2
-            if {$temp > $temp2} {
+            if {$temp > $temp2 || $tbid == $rid} {
                 continue
             }
             
@@ -1362,9 +1472,13 @@ while {$i_run < $num_runs} {
 
                     puts stderr "NEW_SEED $seed_next $swarm(seed_accepted_${seed_cv}) [lindex $swarm(seed_best_${seed_cv}) 0] [lindex $swarm(seed_best_${seed_cv}) 1]"
                     
-                    #save this current structure coordinates to assemble path trajectories
+                    #save this current structure coordinates to assemble path trajectories (also for shooting)
                     file copy -force [format "$output_root.offer.$seed_rep.coor" ""] [format "$output_root.swarm.$seed_next.$swarm(seed_successful_${seed_cv}).coor" ""]
+                    file copy -force [format "$output_root.offer.$seed_rep.vel"  ""] [format "$output_root.swarm.$seed_next.$swarm(seed_successful_${seed_cv}).vel"  ""]
+                    file copy -force [format "$output_root.offer.$seed_rep.xsc"  ""] [format "$output_root.swarm.$seed_next.$swarm(seed_successful_${seed_cv}).xsc"  ""]
                     file copy -force [format "$output_root.offer.$seed_rep.coor" ""] [format "$output_root.swarm.path.$seed_path.coor" ""]
+                    file copy -force [format "$output_root.offer.$seed_rep.vel"  ""] [format "$output_root.swarm.path.$seed_path.vel"  ""]
+                    file copy -force [format "$output_root.offer.$seed_rep.xsc"  ""] [format "$output_root.swarm.path.$seed_path.xsc"  ""]
                                         
                     #Seeding randomly chosen replicas
                     for {set i 0} {$i < $swarmseedreps} {incr i} {
@@ -1545,6 +1659,106 @@ while {$i_run < $num_runs} {
         }
     }
     ############################################################################
+
+    ################################ SHOOTING CYCLE ###############################
+    if {$shooting} {
+       
+        #Manage entering and leaving the baseline regime
+        if {!$shooting_frag($replica_id) && $replica(RankByTemp.$replica_id) < $shootingbasereps} {
+        
+            #start recording continuous time segment
+            set shooting_frag($replica_id.interrupt) 0
+            set shooting_frag($replica_id) 1
+            dcdfile [format $output_root.tmp.dcd $replica_id]
+            dcdframe
+            
+        } elseif {$shooting_frag($replica_id) && ($replica(RankByTemp.$replica_id) >= $shootingbasereps || $shooting_frag($replica_id.interrupt))} {
+        
+            #stop recording
+            #keep fragment only if at least two frames
+            if {$shooting_frag($replica_id) >= 2} {
+                #register the segment
+                incr shooting_frag($replica_id.segments)
+                #rename the segment trajectory
+                file rename -force [format $output_root.tmp.dcd $replica_id] [format $output_root.$shooting_frag($replica_id.segments).dcd $replica_id]
+            } else {
+                #discard segment trajectory
+                file delete [format $output_root.tmp.dcd $replica_id]
+            }
+            set shooting_frag($replica_id) 0
+            
+        } elseif {$shooting_frag($replica_id)} {
+
+            #keep recording
+            dcdframe
+            incr shooting_frag($replica_id)
+        }
+
+        #is a shooting cycle due?
+        if {[expr $i_run % $shootingcycle] == 0 && $i_run >= $shootingcycle} {
+
+            replicaBarrier
+
+            incr shooting_cycle
+            puts "Info: SHOOTING - CYCLE $shooting_cycle"
+
+            #base replica does the heavy lifting
+            if {$replica_id == 0} {
+                puts stderr "SHOOTING_CYCLE $shooting_cycle RUN $i_run"
+
+                #Select shootingpathreps random milestones and assign to random replicas
+                set rused {}
+                for {set i 0} {$i < $shootingpathreps} {incr i} {
+                    set milestone [rselect_milestone [array get shootings]]
+                    set rid [rselect $num_replicas $rused]
+
+                    if {$rid != $replica_id} {
+                        replicaSend [list MILESTONE $milestone] $rid
+                    } else {#oh its me
+                        set shoot_msg [list MILESTONE $milestone]
+                    }
+                    
+                    puts "Info: SHOOTING REPLICA $rid FROM MILESTONE $milestone"
+
+                    lappend rused $rid
+                    incr shootings($milestone)
+                    puts stderr "SHOOTING_MILESTONE $shooting_cycle $rid $milestone"
+                }
+
+                #Send all remaining replica the -1 signal
+                while {[llength $rused] < $num_replicas} {
+                    set rid [rselect $num_replicas $rused]
+                    lappend rused $rid
+
+                    if {$rid != $replica_id} {
+                        replicaSend -1 $rid
+                    } else {#oh its me
+                        set shoot_msg -1
+                    }
+                }
+
+            } else {#worker replica branch
+                #recieve seeding information or -1 if nothing to do
+                puts "Info: SHOOTING - WAITING FOR MILESTONE INFORMATION"
+                set shoot_msg [replicaRecv 0]
+            }
+
+            #Perform seeding based on shoot_msg recieved (or set in case of baseline rep)
+            if {[llength $shoot_msg] == 2 && [lindex $shoot_msg 0] == "MILESTONE"} {
+                set milestone [lindex $shoot_msg 1]
+                puts "Info: SHOOTING FROM MILESTONE $milestone"
+
+                #get seeded
+                reinitatoms $milestones($milestone)
+                minimize 0; #del vels to diverge timelines
+                reinitvels [expr $min_temp/2.]; #reinitvels
+                
+                #notify end of segment due to shooting interruption
+                set shooting_frag($replica_id.interrupt) 1
+            }
+        }
+    }
+    ############################################################################
     
     #write restart information
     if { $i_run % $runs_per_restart == 0 ||
@@ -1577,6 +1791,14 @@ while {$i_run < $num_runs} {
                     lappend swarm_pool_import [SArray::export swarm_pool_${seed_cv}]
                 }
                 puts $rfile [list set swarm_pool_import $swarm_pool_import]
+            }
+
+            #SHOOTING restart information
+            if {$swarming} {
+                puts $rfile [list set shooting_cycle $shooting_cycle]
+                puts $rfile [list array set shootings     [array get shootings]]
+                puts $rfile [list array set milestones    [array get milestones]]
+                puts $rfile [list array set shooting_frag [array get shooting_frag]]
             }
             
             close $rfile
