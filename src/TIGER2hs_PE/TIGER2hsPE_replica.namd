@@ -1794,7 +1794,7 @@ while {$i_run < $num_runs} {
             }
 
             #SHOOTING restart information
-            if {$swarming} {
+            if {$shooting} {
                 puts $rfile [list set shooting_cycle $shooting_cycle]
                 puts $rfile [list array set shootings     [array get shootings]]
                 puts $rfile [list array set milestones    [array get milestones]]
