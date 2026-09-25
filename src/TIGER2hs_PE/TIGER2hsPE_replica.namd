@@ -1012,7 +1012,6 @@ if {[info exists shootingcycle] && $shootingcycle > 0} {
     } else {
         #initialize counters
         set shooting_cycle 0
-        array set shooting_frag {}; #collect segment information
         array set milestones    {}; #milestone to file map
         array set shootings     {}; #milestone statistics
 
@@ -1045,21 +1044,18 @@ if {[info exists shootingcycle] && $shootingcycle > 0} {
             set shootings($i.avg)      0
             set shootings($i.segments) 0
         }
-
-        #inital origin is not a milestone
-        for {set r 0} {$r < $num_replicas} {incr r} {
-            set shooting_frag($r.origin) -1
-        }
     }
-    
+
     #reset segment tracking (also after restart)
+    array set shooting_frag {}
     for {set r 0} {$r < $num_replicas} {incr r} {
         set shooting_frag($r) 0
         set shooting_frag($r.interrupt) 0
+        set shooting_frag($r.origin) -1
     }
 
     #Set frame output to temporary file
-    dcdfile [format $output_root.tmp.dcd $r]
+    dcdfile [format $output_root.tmp.dcd $replica_id]
 
     #override original temperature assignment proc to keep multiple baselines
     proc replica_temp { i } {
@@ -1838,7 +1834,6 @@ while {$i_run < $num_runs} {
                 puts $rfile [list set shooting_cycle $shooting_cycle]
                 puts $rfile [list array set shootings     [array get shootings]]
                 puts $rfile [list array set milestones    [array get milestones]]
-                puts $rfile [list array set shooting_frag [array get shooting_frag]]
             }
             
             close $rfile
