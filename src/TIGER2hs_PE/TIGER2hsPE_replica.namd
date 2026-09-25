@@ -1728,9 +1728,9 @@ while {$i_run < $num_runs} {
                 puts stderr [format "%-16s %8s %10s %10s %10s %12s %12s" "SHOOTING_REPORT" "Cycle" "Milestone" "Injections" "Segments" "Success Rate" "Avg. Length"]
                 for {set i 0} {$i < $num_milestones} {incr i} {
                     #average segment length for milestones
-                    set tmp_avg  [expr {$shootings($i.segments) > 0 ? 1.0 * $shootings($i.avg) / $shootings($i.segments) : 0.0}]
+                    set tmp_avg  [expr {$shootings($i.segments) > 0 ? 1.0 * $shootings($i.avg)      / $shootings($i.segments) : 0.0}]
                     #success rate of injections / collected segments
-                    set tmp_rate [expr {$shootings($i.segments) > 0 ? 1.0 * $shootings($i)     / $shootings($i.segments) : 0.0}]
+                    set tmp_rate [expr {$shootings($i.segments) > 0 ? 1.0 * $shootings($i.segments) / $shootings($i)          : 0.0}]
 
                     puts stderr [format "%-16s %8d %10s %10d %10d %12.4f %12.4f" "SHOOTING_REPORT" $shooting_cycle $i $shootings($i) $shootings($i.segments) $tmp_rate $tmp_avg]
                 }
