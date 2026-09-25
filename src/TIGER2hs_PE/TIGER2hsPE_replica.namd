@@ -1047,12 +1047,19 @@ if {[info exists shootingcycle] && $shootingcycle > 0} {
         }
 
         #inital origin is not a milestone
-        set shooting_frag($replica_id.origin) -1
+        for {set r 0} {$r < $num_replicas} {incr r} {
+            set shooting_frag($r.origin) -1
+        }
     }
     
     #reset segment tracking (also after restart)
-    set shooting_frag($replica_id) 0
-    set shooting_frag($replica_id.interrupt) 0
+    for {set r 0} {$r < $num_replicas} {incr r} {
+        set shooting_frag($r) 0
+        set shooting_frag($r.interrupt) 0
+    }
+
+    #Set frame output to temporary file
+    dcdfile [format $output_root.tmp.dcd $r]
 
     #override original temperature assignment proc to keep multiple baselines
     proc replica_temp { i } {
@@ -1667,38 +1674,46 @@ while {$i_run < $num_runs} {
 
     ################################ SHOOTING CYCLE ###############################
     if {$shooting} {
-       
-        #Manage entering and leaving the baseline regime
-        if {!$shooting_frag($replica_id) && $replica(RankByTemp.$replica_id) < $shootingbasereps} {
-        
-            #start recording continuous time segment
-            set shooting_frag($replica_id.interrupt) 0
-            set shooting_frag($replica_id) 1
-            dcdfile [format $output_root.tmp.dcd $replica_id]
-            dcdframe
-            
-        } elseif {$shooting_frag($replica_id) && ($replica(RankByTemp.$replica_id) >= $shootingbasereps || $shooting_frag($replica_id.interrupt))} {
-        
-            #stop recording
-            #keep fragment only if at least two frames and it originated from a milestone injection
-            if {$shooting_frag($replica_id) >= 2 && $shooting_frag($replica_id.origin) > -1} {
-                #register the segment
-                incr shootings($shooting_frag($replica_id.origin).segments);                            #count of segments collected for milestone
-                incr shootings($shooting_frag($replica_id.origin).avg) $shooting_frag($replica_id);     #average segment length collected for milestone
-                #rename the segment trajectory
-                file rename -force [format $output_root.tmp.dcd $replica_id] [format $output_root.$shooting_frag($replica_id.origin).$shootings($shooting_frag($replica_id.origin).segments).dcd $replica_id]
-            } else {
-                #discard segment trajectory
-                file delete [format $output_root.tmp.dcd $replica_id]
-            }
-            set shooting_frag($replica_id) 0
-            
-        } elseif {$shooting_frag($replica_id)} {
 
-            #keep recording
-            dcdframe
-            incr shooting_frag($replica_id)
+        #Manage entering and leaving the baseline regime
+        #base replica does the heavy lifting
+        if {$replica_id == 0} {
+            for {set r 0} {$r < $num_replicas} {incr r} {
+                if {!$shooting_frag($r) && $replica(RankByTemp.$r) < $shootingbasereps} {
+
+                    #remove old tmp file
+                    file delete -force [format $output_root.tmp.dcd $r]
+
+                    #start recording new continuous time segment
+                    set shooting_frag($r.interrupt) 0
+                    set shooting_frag($r) 1
+
+                } elseif {$shooting_frag($r) && ($replica(RankByTemp.$r) >= $shootingbasereps || $shooting_frag($r.interrupt))} {
+
+                    #keep fragment only if at least two frames and it originated from a milestone injection
+                    if {$shooting_frag($r) >= 2 && $shooting_frag($r.origin) > -1} {
+                        #register the segment
+                        incr shootings($shooting_frag($r.origin).segments);                   #count of segments collected for milestone
+                        incr shootings($shooting_frag($r.origin).avg) $shooting_frag($r);     #average segment length collected for milestone
+                        #save the segment trajectory
+                        file rename -force [format $output_root.tmp.dcd $r] [format $output_root.$shooting_frag($r.origin).$shootings($shooting_frag($r.origin).segments).dcd $r]
+                    }
+                    set shooting_frag($r) 0
+
+                } elseif {$shooting_frag($r)} {
+                    #keep recording
+                    incr shooting_frag($r)
+                }
+            }
         }
+
+        #Open new tmp DCD if needed
+        if {![file exists [format $output_root.tmp.dcd $replica_id]]} {
+            dcdfile [format $output_root.tmp.dcd $replica_id]
+        }
+
+        #Frame output
+        dcdframe
 
         #is a shooting cycle due?
         if {[expr $i_run % $shootingcycle] == 0 && $i_run >= $shootingcycle} {
@@ -1730,17 +1745,26 @@ while {$i_run < $num_runs} {
                     set milestone [rselect_milestone [array get shootings] $num_milestones]
                     set rid [rselect $num_replicas $rused]
 
-                    if {$rid != $replica_id} {
-                        replicaSend [list MILESTONE $milestone] $rid
-                    } else {#oh its me
-                        set shoot_msg [list MILESTONE $milestone]
-                    }
-                    
-                    puts "Info: SHOOTING REPLICA $rid FROM MILESTONE $milestone"
+                    #Ignore if old and new is the same milestone
+                    if {$shooting_frag($rid.origin) != $milestone} {
+                        if {$rid != $replica_id} {
+                            replicaSend [list MILESTONE $milestone] $rid
+                        } else {#oh its me
+                            set shoot_msg [list MILESTONE $milestone]
+                        }
 
-                    lappend rused $rid
-                    incr shootings($milestone)
-                    puts stderr "SHOOTING_MILESTONE $shooting_cycle $rid $milestone"
+                        puts "Info: SHOOTING REPLICA $rid FROM MILESTONE $milestone"
+
+                        #register end of segment due to shooting interruption
+                        set shooting_frag($rid.interrupt) 1
+
+                        #remember origin of injection to count segments
+                        set shooting_frag($rid.origin) $milestone
+
+                        lappend rused $rid
+                        incr shootings($milestone)
+                        puts stderr "SHOOTING_MILESTONE $shooting_cycle $rid $milestone"
+                    }
                 }
 
                 #Send all remaining replica the -1 signal
@@ -1765,23 +1789,12 @@ while {$i_run < $num_runs} {
             if {[llength $shoot_msg] == 2 && [lindex $shoot_msg 0] == "MILESTONE"} {
                 set milestone [lindex $shoot_msg 1]
 
-                #Ignore same milestone as origin
-                if {$milestone != $shooting_frag($replica_id.origin)} {
-                    puts "Info: SHOOTING FROM MILESTONE $milestone"
+                puts "Info: SHOOTING FROM MILESTONE $milestone"
 
-                    #get seeded
-                    reinitatoms $milestones($milestone)
-                    minimize 0; #del vels to diverge timelines
-                    reinitvels [expr $min_temp/2.]; #reinitvels
-
-                    #remember origin of injection to count segments
-                    set shooting_frag($replica_id.origin) $milestone
-
-                    #notify end of segment due to shooting interruption
-                    set shooting_frag($replica_id.interrupt) 1
-                } else {
-                    puts "Info: SHOOTING REJECTED FOR MILESTONE $milestone ALREADY ORIGIN"
-                }
+                #get seeded
+                reinitatoms $milestones($milestone)
+                minimize 0; #del vels to diverge timelines
+                reinitvels [expr $min_temp/2.]; #reinitvels
             }
         }
     }
@@ -1795,15 +1808,6 @@ while {$i_run < $num_runs} {
         output [format $restart_root.$replica_id $replica_id]
         set rfile [open [format "$restart_root.$replica_id.tcl" $replica_id] "w"]
         puts $rfile [list array set replica [array get replica]]
-
-        #SHOOTING restart information
-        if {$shooting} {
-            puts $rfile [list set shooting_cycle $shooting_cycle]
-            puts $rfile [list array set shootings     [array get shootings]]
-            puts $rfile [list array set milestones    [array get milestones]]
-            puts $rfile [list array set shooting_frag [array get shooting_frag]]
-        }
-
         close $rfile
         
         replicaBarrier
@@ -1827,6 +1831,14 @@ while {$i_run < $num_runs} {
                     lappend swarm_pool_import [SArray::export swarm_pool_${seed_cv}]
                 }
                 puts $rfile [list set swarm_pool_import $swarm_pool_import]
+            }
+
+            #SHOOTING restart information
+            if {$shooting} {
+                puts $rfile [list set shooting_cycle $shooting_cycle]
+                puts $rfile [list array set shootings     [array get shootings]]
+                puts $rfile [list array set milestones    [array get milestones]]
+                puts $rfile [list array set shooting_frag [array get shooting_frag]]
             }
             
             close $rfile
