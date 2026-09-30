@@ -2059,23 +2059,6 @@ while {$i_run < $num_runs} {
                 #export graphed pool
                 if {$swarmpoolsize} {
                     puts $rfile [list array set swarm_pool [array get swarm_pool]]
-                    
-                    #clean up old node's files
-                    set removed_files 0
-                    foreach ext {coor vel xsc} {
-                        foreach path [glob -nocomplain -directory $pool_output_root "*.$ext"] {
-                            set node_id [file rootname [file tail $path]]
-
-                            #Only handle numeric pool-node filenames
-                            if {![regexp {^[0-9]+$} $node_id]} {continue}
-
-                            if {[lsearch -exact $swarm_pool(nodes) $node_id] == -1} {
-                                file delete -force $path
-                                incr removed_files
-                            }
-                        }
-                    }
-                    puts "Info: SWARM - POOL CLEANUP - $removed_files FILES REMOVED"
                 }
             }
 
@@ -2087,6 +2070,26 @@ while {$i_run < $num_runs} {
             }
             
             close $rfile
+            
+            #Clean up SWARMING structure pool after restart generation is finished to keep in sync
+            if {$swarming && $swarmpoolsize} {
+                set removed_files 0
+
+                foreach ext {coor vel xsc} {
+                    foreach path [glob -nocomplain -directory $pool_output_root "*.$ext"] {
+                        set node_id [file rootname [file tail $path]]
+
+                        if {![regexp {^[0-9]+$} $node_id]} {continue}
+
+                        if {[lsearch -exact $swarm_pool(nodes) $node_id] == -1} {
+                            file delete -force $path
+                            incr removed_files
+                        }
+                    }
+                }
+
+                puts "Info: SWARM - POOL CLEANUP - $removed_files NODE FILES REMOVED"
+            }
             
             if [info exists old_restart_root] {
                 set oldroot [format $old_restart_root ""]
