@@ -8,6 +8,9 @@ SWARM_POOL columns 1 and 4 (zero-indexed, including the tag) supply cycle
 and CV. Job files are read in numeric order; playback follows log order.
 If a snapshot reports multiple CVs, optional SWARM_POOL_META can identify
 which was active. Otherwise the sole reported CV is used directly.
+Draw probabilities use reported snapshot weights. Recorded best scores
+come from NEW_SEED / OLD_SEED and may reset. Score direction is inferred
+when possible and can be adjusted separately for each CV in the viewer.
 """
 
 import argparse
@@ -115,7 +118,7 @@ def parse_log(lines):
                 start(line_no)
             try:
                 if len(parts) not in (8, 9):
-                    raise ValueError("expected 8 or 9 columns after SWARM_POOL")
+                    raise ValueError("expected 7 or 8 columns after SWARM_POOL")
                 cycle, node_id, parent = map(int, parts[1:4])
                 cv = parts[4]
                 score, attempted, successful = map(float, parts[5:8])
@@ -208,8 +211,8 @@ TEMPLATE = r'''<!doctype html>
 @media(prefers-color-scheme:dark){:root{--bg:#111820;--fg:#e4eaf2;--panel:#1c2632;--line:#495667;--muted:#aebaca;--series:#6bb9e5;--other:#efaa70;--tip:#ef91b6;--highlight:#263f52}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}main{max-width:1250px;margin:auto;padding:24px}h1{font-size:24px;margin:0 0 8px}h2{font-size:18px;margin:24px 0 10px}.muted{color:var(--muted)}button,select{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:6px 10px}button{cursor:pointer}button:disabled{opacity:.45;cursor:default}button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--series);outline-offset:3px}.controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px 0}.controls label{display:flex;align-items:center;gap:7px}input[type=range]{flex:1;min-width:130px;accent-color:var(--series)}#status{font-variant-numeric:tabular-nums}#graph-wrap{overflow:auto;max-height:640px;border:1px solid var(--line);margin-top:12px;background:var(--panel)}#graph{display:block;width:100%;min-width:520px}svg text{fill:var(--fg);font:12px system-ui,sans-serif}#selected{padding:10px 0;min-height:42px;font-variant-numeric:tabular-nums}.legend{display:flex;flex-wrap:wrap;gap:16px;font-size:13px;color:var(--muted)}.legend .one{color:var(--series)}.legend .two{color:var(--other)}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{text-align:right;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}th:first-child,td:first-child{text-align:left}tbody tr{cursor:pointer}tbody tr:hover,tbody tr.selected{background:var(--highlight)}#trend{width:100%;display:block}details{margin-top:18px}#warnings{overflow-wrap:anywhere;padding-left:22px}.node{cursor:pointer}.node:focus{outline:none}.node:focus circle{stroke:var(--fg);stroke-width:3}#snapshot-label{min-width:120px}.empty{fill:var(--muted)}@media(max-width:600px){main{padding:14px}h1{font-size:21px}.controls{gap:8px}#status{font-size:14px}}
 </style></head><body><main>
-<h1>SWARM pool development</h1><div class="muted">__TITLE__ · Offline report · Snapshots follow log order</div>
-<div class="controls"><button id="prev" type="button">Previous</button><button id="play" type="button">Play</button><button id="next" type="button">Next</button><label>Delay (s) <input id="delay" type="number" required min="0.05" max="60" step="0.05" value="0.9" style="width:90px;font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:6px"></label><label for="cycle" id="snapshot-label">Snapshot <span id="position"></span></label><input type="range" id="cycle" min="0" value="0" aria-label="Snapshot"></div>
+<h1>SWARM pool development</h1><div class="muted">__TITLE__</div>
+<div class="controls"><button id="prev" type="button">Previous</button><button id="play" type="button">Play</button><button id="next" type="button">Next</button><label>Delay (s) <input id="delay" type="number" required min="0.05" max="60" step="any" value="0.9" style="width:90px;font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:6px"></label><label for="cycle" id="snapshot-label">Snapshot <span id="position"></span></label><input type="range" id="cycle" min="0" value="0" aria-label="Snapshot"></div>
 <div class="controls"><label>CV <select id="cv"></select></label><label>Best score <select id="direction"><option value="min">Lower is better</option><option value="max">Higher is better</option></select></label><label>Node color <select id="color"><option value="id">Node ID</option><option value="score">CV score</option></select></label><label>Node size <select id="size"><option value="weight">Weight</option><option value="probability">Draw probability</option><option value="uniform">Uniform</option></select></label><label>Edge width <select id="edges"><option value="uniform">Uniform</option><option value="weight">Smaller endpoint weight</option></select></label></div>
 <div id="status" aria-live="polite"></div>
 <div id="graph-wrap"><svg id="graph" role="img" aria-label="Pool parent-child graph"></svg></div>
@@ -218,7 +221,7 @@ TEMPLATE = r'''<!doctype html>
 <div class="table-wrap"><table><thead><tr><th>Node</th><th>Parent</th><th>Score</th><th>Attempts</th><th>Successes</th><th>Weight</th><th>Draw probability</th></tr></thead><tbody id="rows"></tbody></table></div>
 <h2>Best score over snapshots</h2><div class="legend"><span class="one">━ Recorded swarming best</span><span class="two">━ Best retained in pool</span></div>
 <svg id="trend" role="img" aria-label="Best scores over snapshots"></svg>
-<div class="muted" style="font-size:13px">Recorded best comes from NEW_SEED / OLD_SEED and may reset. Draw probabilities use reported snapshot weights, not earlier injection draws. Score units are not recorded. Direction is inferred from seed records when possible; check the selector.</div>
+<div class="muted" style="font-size:13px">Probabilities use the weights at the reported snapshot.</div>
 <details id="validation"><summary id="validation-title"></summary><ul id="warnings"></ul></details>
 </main><script id="pool-data" type="application/json">__DATA__</script><script>
 'use strict';
@@ -227,7 +230,20 @@ const byId=id=>document.getElementById(id),slider=byId('cycle'),cvSelect=byId('c
 const colorTheme=window.matchMedia?window.matchMedia('(prefers-color-scheme: dark)'):null;
 function idColor(id){return `hsl(${((id*137.508)%360).toFixed(3)},72%,${colorTheme&&colorTheme.matches?64:46}%)`}
 delayInput.value=report.delay??0.9;
-let selected=null,timer=null,lastCv=null;
+let selected=null,timer=null,lastCv=null,trendCacheKey=null;
+const cvDirections={...report.directions},scoreRanges=Object.create(null),histories=Object.create(null);
+for(const cv of report.cvs)histories[cv]=[];
+//Compute score ranges and pool extrema once; redraws inspect only current nodes.
+for(let i=0;i<data.length;i++){
+const s=data[i],extrema=Object.create(null);
+for(const n of s.nodes){if(!n.id)continue;for(const [cv,row] of Object.entries(n.cvs)){
+const range=scoreRanges[cv]||(scoreRanges[cv]={min:Infinity,max:-Infinity});
+range.min=Math.min(range.min,row.score);range.max=Math.max(range.max,row.score);
+const pair=extrema[cv]||(extrema[cv]={min:Infinity,max:-Infinity});
+pair.min=Math.min(pair.min,row.score);pair.max=Math.max(pair.max,row.score);
+}}
+for(const cv of report.cvs)histories[cv].push({x:i+1,min:extrema[cv]?.min??null,max:extrema[cv]?.max??null,record:s.record[cv]??null,s});
+}
 slider.max=data.length-1;slider.value=data.length-1;
 function option(value,label){const o=document.createElement('option');o.value=value;o.textContent=label;cvSelect.append(o)}
 if(report.cvs.length>1 && data.some(s=>s.active))option('__active__','Follow active CV');
@@ -264,7 +280,7 @@ const strength=weighted?Math.min(p.row.weight,n.row.weight):null;
 const thickness=weighted?1+4*Math.sqrt(strength/(1+strength)):1.5;
 const line=el('line',{'data-parent':p.id,'data-child':n.id,x1:p.x+dx*(radius(p)+3)/len,y1:p.y+dy*(radius(p)+3)/len,x2:n.x-dx*(radius(n)+5)/len,y2:n.y-dy*(radius(n)+5)/len,stroke:'var(--muted)','stroke-width':thickness,'marker-end':'url(#arrow)'});
 line.append(el('title',{},weighted?`Node ${p.id} → ${n.id}; smaller endpoint weight ${fmt(strength)}`:`Node ${p.id} → ${n.id}; uniform width`));svg.append(line);}
-const scores=data.flatMap(t=>t.nodes.filter(n=>n.id&&n.cvs[cv]).map(n=>n.cvs[cv].score));let lo=Infinity,hi=-Infinity;for(const v of scores){lo=Math.min(lo,v);hi=Math.max(hi,v)}
+const {min:lo,max:hi}=scoreRanges[cv]||{min:Infinity,max:-Infinity};
 for(const n of nodes){const row=n.row;let fraction=row&&hi>lo?(row.score-lo)/(hi-lo):.5;if(direction.value==='min')fraction=1-fraction;
 const g=el('g',{transform:`translate(${n.x},${n.y})`,class:'node',tabindex:0,role:'button','aria-label':`Node ${n.id}, score ${row?fmt(row.score):'unavailable'}`});
 const fill=!n.id?'var(--line)':colorSelect.value==='id'?idColor(n.id):row?'var(--series)':'var(--line)';
@@ -274,12 +290,16 @@ g.append(el('title',{},`Node ${n.id}; parent ${n.parent}; attempts ${row?fmt(row
 g.addEventListener('click',()=>selectNode(n.id));g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectNode(n.id)}});svg.append(g);}
 }
 function drawTrend(cv){
-const svg=byId('trend');svg.replaceChildren();const width=Math.max(300,svg.clientWidth),height=265,m={left:66,right:24,top:22,bottom:52};svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
-const points=data.map((s,i)=>{const rows=s.nodes.filter(n=>n.id&&n.cvs[cv]).map(n=>n.cvs[cv].score);const pool=rows.length?rows.reduce((a,b)=>direction.value==='min'?Math.min(a,b):Math.max(a,b)):null;return {x:i+1,pool,record:s.record[cv]??null,s}});
+const svg=byId('trend'),width=Math.max(300,svg.clientWidth),height=265,m={left:66,right:24,top:22,bottom:52};
+const x=v=>m.left+(v-1)/Math.max(1,data.length-1)*(width-m.left-m.right);
+const key=JSON.stringify([cv,direction.value,width]),current=svg.querySelector('[data-current-snapshot]');
+if(trendCacheKey===key&&current){current.setAttribute('x1',x(+slider.value+1));current.setAttribute('x2',x(+slider.value+1));return}
+trendCacheKey=key;svg.replaceChildren();svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
+const points=(histories[cv]||[]).map(p=>({...p,pool:direction.value==='min'?p.min:p.max}));
 let lo=Infinity,hi=-Infinity;for(const p of points)for(const v of [p.pool,p.record])if(v!==null){lo=Math.min(lo,v);hi=Math.max(hi,v)}
 if(!Number.isFinite(lo)){svg.append(el('text',{x:width/2,y:80,'text-anchor':'middle'},'No scores available for this CV'));return}
 const pad=(hi-lo)*.1||Math.max(1,Math.abs(lo)*.05);lo-=pad;hi+=pad;
-const x=v=>m.left+(v-1)/Math.max(1,data.length-1)*(width-m.left-m.right),y=v=>height-m.bottom-(v-lo)/(hi-lo)*(height-m.top-m.bottom);
+const y=v=>height-m.bottom-(v-lo)/(hi-lo)*(height-m.top-m.bottom);
 svg.append(el('rect',{x:m.left,y:m.top,width:width-m.left-m.right,height:height-m.top-m.bottom,fill:'none',stroke:'var(--line)'}));
 for(let i=0;i<5;i++){const v=lo+(hi-lo)*i/4,yy=y(v);svg.append(el('line',{x1:m.left,x2:width-m.right,y1:yy,y2:yy,stroke:'var(--line)','stroke-opacity':.35}));svg.append(el('text',{x:m.left-9,y:yy+4,'text-anchor':'end'},fmt(v)));}
 const count=width<450?3:6;const ticks=[...new Set(Array.from({length:count},(_,i)=>Math.round(1+(data.length-1)*i/(count-1))))];for(const tick of ticks)svg.append(el('text',{x:x(tick),y:height-m.bottom+21,'text-anchor':'middle'},tick));
@@ -287,9 +307,9 @@ svg.append(el('text',{x:(m.left+width-m.right)/2,y:height-8,'text-anchor':'middl
 svg.append(el('text',{transform:`translate(17,${(m.top+height-m.bottom)/2}) rotate(-90)`,'text-anchor':'middle'},`CV score`));
 for(const [key,color] of [['record','var(--series)'],['pool','var(--other)']]){let d='',prev=null;for(const p of points){if(p[key]===null){prev=null;continue}d+=prev?`H${x(p.x)}V${y(p[key])}`:`M${x(p.x)},${y(p[key])}`;prev=p;}svg.append(el('path',{d,fill:'none',stroke:color,'stroke-width':2}));
 for(const p of points)if(p[key]!==null){const g=el('g',{role:'button',tabindex:0,'aria-label':`Snapshot ${p.x}, ${key} score ${p[key]}`});g.append(el('circle',{cx:x(p.x),cy:y(p[key]),r:10,fill:'transparent'}));g.append(el('circle',{cx:x(p.x),cy:y(p[key]),r:3,fill:color}));g.append(el('title',{},`Snapshot ${p.x}; cycle ${p.s.cycle}; ${key==='record'?'recorded best':'pool best'} ${p[key]}`));const choose=()=>{slider.value=p.x-1;draw()};g.addEventListener('click',choose);g.addEventListener('keydown',e=>{if(e.key==='Enter'){choose()}});svg.append(g);}}
-svg.append(el('line',{x1:x(+slider.value+1),x2:x(+slider.value+1),y1:m.top,y2:height-m.bottom,stroke:'var(--fg)','stroke-opacity':.4}));
+svg.append(el('line',{'data-current-snapshot':'',x1:x(+slider.value+1),x2:x(+slider.value+1),y1:m.top,y2:height-m.bottom,stroke:'var(--fg)','stroke-opacity':.4}));
 }
-function draw(){const i=+slider.value,s=data[i],cv=activeCv(s);if(cv!==lastCv){direction.value=report.directions[cv]||'min';lastCv=cv}
+function draw(){const i=+slider.value,s=data[i],cv=activeCv(s);if(cv!==lastCv){direction.value=cvDirections[cv]||'min';lastCv=cv}
 byId('color-legend').textContent=colorSelect.value==='id'?'Color identifies node ID; neighboring IDs use contrasting hues':'Darker fill = better score on a fixed scale per CV';
 byId('edge-legend').textContent=edgeSelect.value==='weight'?'Thicker edges = both endpoints more strongly weighted (compressed scale); root edges uniform':'Edges have uniform width';
 byId('position').textContent=`${i+1} / ${data.length}`;byId('prev').disabled=i===0;byId('next').disabled=i===data.length-1;
@@ -304,7 +324,7 @@ byId('prev').addEventListener('click',()=>{stop();slider.value=Math.max(0,+slide
 byId('play').addEventListener('click',()=>{if(timer){stop();return}if(!delayInput.checkValidity()){delayInput.reportValidity();return}if(+slider.value===data.length-1){slider.value=0;draw()}byId('play').textContent='Pause';schedule()});
 delayInput.addEventListener('input',()=>{if(delayInput.checkValidity()&&timer)schedule()});
 delayInput.addEventListener('change',()=>{if(!delayInput.checkValidity()){stop();delayInput.reportValidity()}});
-cvSelect.addEventListener('change',draw);direction.addEventListener('change',draw);sizeSelect.addEventListener('change',draw);
+cvSelect.addEventListener('change',draw);direction.addEventListener('change',()=>{const cv=activeCv(data[+slider.value]);if(cv)cvDirections[cv]=direction.value;draw()});sizeSelect.addEventListener('change',draw);
 edgeSelect.addEventListener('change',draw);colorSelect.addEventListener('change',draw);
 if(colorTheme&&colorTheme.addEventListener)colorTheme.addEventListener('change',draw);
 window.addEventListener('resize',draw);draw();
