@@ -6,7 +6,7 @@
 #              Institute of Biochemistry, University of Greifswald, Felix-Hausdorff-Straße 4, 17487 Greifswald, Germany
 # Journal:     
 #
-# -- TIGER2hs-PE (pair exchange version) + swarming --
+# -- TIGER2hs-PE (pair exchange version) + swarming + shooting --
 #
 # Implementation of the hybrid solvent TIGER2hsPE with OpenMM interface and swarming extension
 # for the NAMD - NAnoscale Molecular Dynamics program[1]. The implementation is majorly the original REMD script
@@ -41,6 +41,7 @@
 #           can just be concatenated, they all build the baseline ensemble.
 #
 #           Swarming extension: bla bla
+#           Shooting extension: bla bla
 
 after 5000 replicaBarrier; #prevents segfaulting if parallel startup is really unsynchronous
 
