@@ -1807,11 +1807,6 @@ while {$i_run < $num_runs} {
                             }
                         }
 
-                        #clean up files
-                        file delete -force "$pool_output_root/$removed_id.coor"
-                        file delete -force "$pool_output_root/$removed_id.vel"
-                        file delete -force "$pool_output_root/$removed_id.xsc"
-
                         puts "Info: SWARM - $seed_caption - POOL NODE $removed_id DROPPED - REPLACEMENT $replacement"
                     }
                                         
@@ -2064,6 +2059,23 @@ while {$i_run < $num_runs} {
                 #export graphed pool
                 if {$swarmpoolsize} {
                     puts $rfile [list array set swarm_pool [array get swarm_pool]]
+                    
+                    #clean up old node's files
+                    set removed_files 0
+                    foreach ext {coor vel xsc} {
+                        foreach path [glob -nocomplain -directory $pool_output_root "*.$ext"] {
+                            set node_id [file rootname [file tail $path]]
+
+                            #Only handle numeric pool-node filenames
+                            if {![regexp {^[0-9]+$} $node_id]} {continue}
+
+                            if {[lsearch -exact $swarm_pool(nodes) $node_id] == -1} {
+                                file delete -force $path
+                                incr removed_files
+                            }
+                        }
+                    }
+                    puts "Info: SWARM - POOL CLEANUP - $removed_files FILES REMOVED"
                 }
             }
 

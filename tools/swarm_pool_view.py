@@ -272,13 +272,15 @@ svg.setAttribute('viewBox',`0 0 ${width} ${height}`);svg.style.width=width+'px';
 svg.append(el('title',{},`Snapshot ${+slider.value+1}, CV ${cv||'unknown'}, ${nodes.length-Number(map.has(0))} real nodes`));
 for(const n of nodes)n.x=65+n.depth*(width-140)/depth;
 const radius=n=>{if(!n.id)return 10;if(sizeSelect.value==='uniform'||!n.row)return 14;const w=n.row.weight;if(w===null)return 14;const v=sizeSelect.value==='probability'?(total>0?w/total:0)*nodes.length:w;return Math.min(27,Math.sqrt(130+170*Math.max(0,v)))};
-const defs=el('defs'),marker=el('marker',{id:'arrow',viewBox:'0 -3 6 6',refX:6,markerWidth:6,markerHeight:6,markerUnits:'userSpaceOnUse',orient:'auto'});marker.append(el('path',{d:'M0,-3L6,0L0,3',fill:'var(--muted)'}));defs.append(marker);svg.append(defs);
+const defs=el('defs'),marker=el('marker',{id:'arrow',viewBox:'0 -3 6 6',refX:0,markerWidth:4,markerHeight:4,markerUnits:'strokeWidth',orient:'auto'});marker.append(el('path',{d:'M0,-3L6,0L0,3',fill:'var(--muted)'}));defs.append(marker);svg.append(defs);
 for(const n of nodes){const p=map.get(n.parent);if(!p||p===n)continue;const dx=n.x-p.x,dy=n.y-p.y,len=Math.hypot(dx,dy);if(!len)continue;
 const weighted=edgeSelect.value==='weight'&&p.id!==0&&p.row&&n.row&&p.row.weight!==null&&n.row.weight!==null;
 const strength=weighted?Math.min(p.row.weight,n.row.weight):null;
 //Fixed compressed scale, unchanged across snapshots and CV rotations.
 const thickness=weighted?1+4*Math.sqrt(strength/(1+strength)):1.5;
-const line=el('line',{'data-parent':p.id,'data-child':n.id,x1:p.x+dx*(radius(p)+3)/len,y1:p.y+dy*(radius(p)+3)/len,x2:n.x-dx*(radius(n)+5)/len,y2:n.y-dy*(radius(n)+5)/len,stroke:'var(--muted)','stroke-width':thickness,'marker-end':'url(#arrow)'});
+//Anchor the arrow at its base; the shaft ends before the triangular head.
+const endGap=radius(n)+5+4*thickness;
+const line=el('line',{'data-parent':p.id,'data-child':n.id,x1:p.x+dx*(radius(p)+3)/len,y1:p.y+dy*(radius(p)+3)/len,x2:n.x-dx*endGap/len,y2:n.y-dy*endGap/len,stroke:'var(--muted)','stroke-width':thickness,'stroke-linecap':'butt','marker-end':'url(#arrow)'});
 line.append(el('title',{},weighted?`Node ${p.id} → ${n.id}; smaller endpoint weight ${fmt(strength)}`:`Node ${p.id} → ${n.id}; uniform width`));svg.append(line);}
 const {min:lo,max:hi}=scoreRanges[cv]||{min:Infinity,max:-Infinity};
 for(const n of nodes){const row=n.row;let fraction=row&&hi>lo?(row.score-lo)/(hi-lo):.5;if(direction.value==='min')fraction=1-fraction;
