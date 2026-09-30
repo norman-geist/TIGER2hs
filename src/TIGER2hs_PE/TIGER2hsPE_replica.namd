@@ -2077,7 +2077,7 @@ while {$i_run < $num_runs} {
             close $rfile
             
             if [info exists old_restart_root] {
-#                 set oldroot [format $old_restart_root ""]
+                set oldroot [format $old_restart_root ""]
                 file delete $oldroot.tcl
             }
         }
