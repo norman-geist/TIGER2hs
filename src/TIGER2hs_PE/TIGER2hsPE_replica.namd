@@ -76,16 +76,15 @@ proc rselect {num_reps exclude_ids} {
     return $svar
 }
 
-proc rselect_milestone {weights num_milestones} {
+proc rselect_milestone {weights num_milestones decay} {
     set milestone ""
     set tmp_best Inf
-    
+
     array set shootings $weights
 
     for {set i 0} {$i < $num_milestones} {incr i} {
-        set weight [expr {1.0 / ($shootings($i) + 1.0)}]
+        set weight [expr {1.0 / pow($shootings($i) + 1.0, $decay)}]
 
-        # Exclude zero to keep log(u) defined.
         set u 0.0
         while {$u <= 0.0} {
             set u [expr {rand()}]
@@ -1142,7 +1141,7 @@ if {[info exists swarmcycle] && $swarmcycle > 0} {
     if {$swarmpoolsize > 0} {    
         set pool_output_root "swarm-pool"
         if {![file exists $pool_output_root] && $replica_id == 0} {
-            puts "Info: SWARM - SETTING UP GRAPHED STRUCTURE POOL"
+            puts "Info: SWARM - SETTING UP GRAPHED STRUCTURE POOL (decay $swarmpooldecay)"
             file mkdir $pool_output_root
         } else {
             puts "Warn: SWARM - USING EXISTING STRUCTURE POOL - BE CAUTIOUS"
@@ -1200,6 +1199,7 @@ if {[info exists shootingcycle] && $shootingcycle > 0} {
     puts "Info: SHOOTING - USING STATIC CYCLE LENGTHS $shootingcycle"
     puts "Info: SHOOTING - USING $shootingbasereps REPLICAS AT THE BASELINE"
     puts "Info: SHOOTING - USING $shootingpathreps REPLICAS FOR INJECTIONS"
+    puts "Info: SHOOTING - USING $shootingdecay DECAY FOR MILESTONE WEIGHTING"
 
     if {[info exists restart_root]} { #restart
         puts "Info: SHOOTING - RESTARTING FROM PREVIOUS JOB"
@@ -1973,7 +1973,7 @@ while {$i_run < $num_runs} {
                 #Select shootingpathreps random milestones and assign to random replicas
                 set rused {}
                 for {set i 0} {$i < $shootingpathreps} {incr i} {
-                    set milestone [rselect_milestone [array get shootings] $num_milestones]
+                    set milestone [rselect_milestone [array get shootings] $num_milestones $shootingdecay]
                     set rid [rselect $num_replicas $rused]
 
                     #Ignore if old and new is the same milestone
