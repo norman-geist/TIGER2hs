@@ -11,6 +11,9 @@ which was active. Otherwise the sole reported CV is used directly.
 Draw probabilities use reported snapshot weights. Recorded best scores
 come from NEW_SEED / OLD_SEED and may reset. Score direction is inferred
 when possible and can be adjusted separately for each CV in the viewer.
+Pool CV spread shows the retained score range and median, excluding virtual root 0.
+Render GIF exports the full graph sequence using the current display settings,
+playback delay, and smooth-motion preference; rendering can be cancelled.
 """
 
 import argparse
@@ -209,16 +212,20 @@ TEMPLATE = r'''<!doctype html>
 <style>
 :root {color-scheme:light dark;--bg:#f8fafc;--fg:#17212e;--panel:#fff;--line:#cbd5e1;--muted:#536173;--series:#176b9b;--other:#bb6127;--tip:#8c3455;--highlight:#e6f2fb}
 @media(prefers-color-scheme:dark){:root{--bg:#111820;--fg:#e4eaf2;--panel:#1c2632;--line:#495667;--muted:#aebaca;--series:#6bb9e5;--other:#efaa70;--tip:#ef91b6;--highlight:#263f52}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}main{max-width:1250px;margin:auto;padding:24px}h1{font-size:24px;margin:0 0 8px}h2{font-size:18px;margin:24px 0 10px}.muted{color:var(--muted)}button,select{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:6px 10px}button{cursor:pointer}button:disabled{opacity:.45;cursor:default}button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--series);outline-offset:3px}.controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px 0}.controls label{display:flex;align-items:center;gap:7px}input[type=range]{flex:1;min-width:130px;accent-color:var(--series)}#status{font-variant-numeric:tabular-nums}#graph-wrap{overflow:auto;max-height:640px;border:1px solid var(--line);margin-top:12px;background:var(--panel)}#graph{display:block;width:100%;min-width:520px}svg text{fill:var(--fg);font:12px system-ui,sans-serif}#selected{padding:10px 0;min-height:42px;font-variant-numeric:tabular-nums}.legend{display:flex;flex-wrap:wrap;gap:16px;font-size:13px;color:var(--muted)}.legend .one{color:var(--series)}.legend .two{color:var(--other)}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{text-align:right;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}th:first-child,td:first-child{text-align:left}tbody tr{cursor:pointer}tbody tr:hover,tbody tr.selected{background:var(--highlight)}#trend{width:100%;display:block}details{margin-top:18px}#warnings{overflow-wrap:anywhere;padding-left:22px}.node{cursor:pointer}.node:focus{outline:none}.node:focus circle{stroke:var(--fg);stroke-width:3}#snapshot-label{min-width:120px}.empty{fill:var(--muted)}@media(max-width:600px){main{padding:14px}h1{font-size:21px}.controls{gap:8px}#status{font-size:14px}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}main{max-width:1250px;margin:auto;padding:24px}h1{font-size:24px;margin:0 0 8px}h2{font-size:18px;margin:24px 0 10px}.muted{color:var(--muted)}button,select{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:6px 10px}button{cursor:pointer}button:disabled{opacity:.45;cursor:default}button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--series);outline-offset:3px}.controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px 0}.controls label{display:flex;align-items:center;gap:7px}input[type=range]{flex:1;min-width:130px;accent-color:var(--series)}input[type=number]{appearance:textfield;-moz-appearance:textfield}input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}#status{font-variant-numeric:tabular-nums}#graph-wrap{overflow:auto;max-height:640px;border:1px solid var(--line);margin-top:12px;background:var(--panel)}#graph{display:block;width:100%;min-width:520px}svg text{fill:var(--fg);font:12px system-ui,sans-serif}#selected{padding:10px 0;min-height:42px;font-variant-numeric:tabular-nums}.legend{display:flex;flex-wrap:wrap;gap:16px;font-size:13px;color:var(--muted)}.legend .one{color:var(--series)}.legend .two{color:var(--other)}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{text-align:right;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}th:first-child,td:first-child{text-align:left}tbody tr{cursor:pointer}tbody tr:hover,tbody tr.selected{background:var(--highlight)}#trend,#spread{width:100%;display:block}details{margin-top:18px}#warnings{overflow-wrap:anywhere;padding-left:22px}.node{cursor:pointer}.node:focus{outline:none}.node:focus circle{stroke:var(--fg);stroke-width:3}#snapshot-label{min-width:120px}.empty{fill:var(--muted)}@media(max-width:600px){main{padding:14px}h1{font-size:21px}.controls{gap:8px}#status{font-size:14px}}
 </style></head><body><main>
 <h1>SWARM pool development</h1><div class="muted">__TITLE__</div>
-<div class="controls"><button id="prev" type="button">Previous</button><button id="play" type="button">Play</button><button id="next" type="button">Next</button><label>Delay (s) <input id="delay" type="number" required min="0.05" max="60" step="any" value="0.9" style="width:90px;font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:6px"></label><label for="cycle" id="snapshot-label">Snapshot <span id="position"></span></label><input type="range" id="cycle" min="0" value="0" aria-label="Snapshot"></div>
-<div class="controls"><label>CV <select id="cv"></select></label><label>Best score <select id="direction"><option value="min">Lower is better</option><option value="max">Higher is better</option></select></label><label>Node color <select id="color"><option value="id">Node ID</option><option value="score">CV score</option></select></label><label>Node size <select id="size"><option value="weight">Weight</option><option value="probability">Draw probability</option><option value="uniform">Uniform</option></select></label><label>Edge width <select id="edges"><option value="uniform">Uniform</option><option value="weight">Smaller endpoint weight</option></select></label></div>
-<div id="status" aria-live="polite"></div>
+<div class="controls"><button id="prev" type="button">Previous</button><button id="play" type="button">Play</button><button id="next" type="button">Next</button><button id="render-gif" type="button">Render GIF</button><label for="delay">Delay (s)</label><button id="delay-down" type="button" aria-label="Decrease playback delay">−</button><input id="delay" type="number" required min="0.05" max="60" step="any" value="0.9" style="width:90px;font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:6px"><button id="delay-up" type="button" aria-label="Increase playback delay">+</button><label for="cycle" id="snapshot-label">Snapshot <span id="position"></span></label><input type="range" id="cycle" min="0" value="0" aria-label="Snapshot"></div>
+<div class="controls"><label>CV <select id="cv"></select></label><label>Best score <select id="direction"><option value="min">Lower is better</option><option value="max">Higher is better</option></select></label><label>Node color <select id="color"><option value="id">Node ID</option><option value="score">CV score</option></select></label><label>Node size <select id="size"><option value="weight">Weight</option><option value="probability">Draw probability</option><option value="uniform">Uniform</option></select></label><label><input id="motion" type="checkbox" checked> Smooth motion</label><label>Edge width <select id="edges"><option value="uniform">Uniform</option><option value="weight">Smaller endpoint weight</option></select></label></div>
+<div id="status" aria-live="polite"></div><div id="export-status" role="status" aria-live="polite" class="muted"></div>
 <div id="graph-wrap"><svg id="graph" role="img" aria-label="Pool parent-child graph"></svg></div>
 <div class="legend"><span id="color-legend">Color identifies node ID; neighboring IDs use contrasting hues</span><span>Arrow = parent → child</span><span id="edge-legend">Edges have uniform width</span><span>Root 0 is virtual</span></div>
 <div id="selected" aria-live="polite">Select a node to inspect its counters.</div>
 <div class="table-wrap"><table><thead><tr><th>Node</th><th>Parent</th><th>Score</th><th>Attempts</th><th>Successes</th><th>Weight</th><th>Draw probability</th></tr></thead><tbody id="rows"></tbody></table></div>
+<h2>Pool CV spread</h2>
+<div id="spread-summary" aria-live="polite"></div>
+<div class="legend"><span class="two">Shaded band: minimum–maximum</span><span class="one">━ Median</span><span>Virtual root excluded; gaps indicate unreported CV scores</span></div>
+<svg id="spread" role="img" aria-label="Retained pool CV range and median over snapshots"></svg>
 <h2>Best score over snapshots</h2><div class="legend"><span class="one">━ Recorded swarming best</span><span class="two">━ Best retained in pool</span></div>
 <svg id="trend" role="img" aria-label="Best scores over snapshots"></svg>
 <div class="muted" style="font-size:13px">Probabilities use the weights at the reported snapshot.</div>
@@ -230,7 +237,7 @@ const byId=id=>document.getElementById(id),slider=byId('cycle'),cvSelect=byId('c
 const colorTheme=window.matchMedia?window.matchMedia('(prefers-color-scheme: dark)'):null;
 function idColor(id){return `hsl(${((id*137.508)%360).toFixed(3)},72%,${colorTheme&&colorTheme.matches?64:46}%)`}
 delayInput.value=report.delay??0.9;
-let selected=null,timer=null,lastCv=null,trendCacheKey=null;
+let selected=null,timer=null,lastCv=null,trendCacheKey=null,spreadCacheKey=null;
 const cvDirections={...report.directions},scoreRanges=Object.create(null),histories=Object.create(null);
 for(const cv of report.cvs)histories[cv]=[];
 //Compute score ranges and pool extrema once; redraws inspect only current nodes.
@@ -239,10 +246,14 @@ const s=data[i],extrema=Object.create(null);
 for(const n of s.nodes){if(!n.id)continue;for(const [cv,row] of Object.entries(n.cvs)){
 const range=scoreRanges[cv]||(scoreRanges[cv]={min:Infinity,max:-Infinity});
 range.min=Math.min(range.min,row.score);range.max=Math.max(range.max,row.score);
-const pair=extrema[cv]||(extrema[cv]={min:Infinity,max:-Infinity});
-pair.min=Math.min(pair.min,row.score);pair.max=Math.max(pair.max,row.score);
+const pair=extrema[cv]||(extrema[cv]={min:Infinity,max:-Infinity,values:[]});
+pair.values.push(row.score);pair.min=Math.min(pair.min,row.score);pair.max=Math.max(pair.max,row.score);
 }}
-for(const cv of report.cvs)histories[cv].push({x:i+1,min:extrema[cv]?.min??null,max:extrema[cv]?.max??null,record:s.record[cv]??null,s});
+for(const cv of report.cvs){
+const values=extrema[cv]?.values||[];values.sort((a,b)=>a-b);
+const count=values.length,middle=Math.floor(count/2),median=count?(count%2?values[middle]:values[middle-1]/2+values[middle]/2):null;
+histories[cv].push({x:i+1,min:extrema[cv]?.min??null,max:extrema[cv]?.max??null,median,count,record:s.record[cv]??null,s});
+}
 }
 slider.max=data.length-1;slider.value=data.length-1;
 function option(value,label){const o=document.createElement('option');o.value=value;o.textContent=label;cvSelect.append(o)}
@@ -257,40 +268,181 @@ function el(tag,attrs={},text){const n=document.createElementNS(NS,tag);for(cons
 function activeCv(s){return cvSelect.value==='__active__'?s.active:cvSelect.value}
 function stop(){if(timer)clearInterval(timer);timer=null;byId('play').textContent='Play'}
 function schedule(){if(timer)clearInterval(timer);timer=setInterval(()=>{if(+slider.value>=data.length-1){stop();return}slider.value=+slider.value+1;draw();if(+slider.value===data.length-1)stop()},Number(delayInput.value)*1000)}
-function selectNode(id){selected=id;draw()}
+function selectNode(id){if(exportRunning)return;selected=id;draw()}
+const graphNodes=new Map(),graphEdges=new Map();
+let graphFrame=null,graphSnapshot=null,graphSize=null,graphTransition=null;
+let exportRunning=false,exportAbort=false,exportStepping=false;
+const reducedMotion=window.matchMedia?window.matchMedia('(prefers-reduced-motion: reduce)'):null;
+const motionInput=byId('motion');
 function drawGraph(s,cv,total){
-const svg=byId('graph');svg.replaceChildren();
+const svg=byId('graph'),snapshot=+slider.value;
+const animate=graphSnapshot!==null&&motionInput.checked&&!(reducedMotion&&reducedMotion.matches)&&(snapshot!==graphSnapshot||graphFrame!==null);
+if(graphFrame!==null){cancelAnimationFrame(graphFrame);graphFrame=null}
+if(!svg.querySelector('[data-node-layer]')){
+svg.replaceChildren();svg.append(el('title'));
+const defs=el('defs'),marker=el('marker',{id:'arrow',viewBox:'0 -3 6 6',refX:0,markerWidth:4,markerHeight:4,markerUnits:'strokeWidth',orient:'auto'});
+marker.append(el('path',{d:'M0,-3L6,0L0,3',fill:'var(--muted)'}));defs.append(marker);svg.append(defs);
+svg.append(el('g',{'data-edge-layer':''}),el('g',{'data-node-layer':''}));
+}
+const edgeLayer=svg.querySelector('[data-edge-layer]'),nodeLayer=svg.querySelector('[data-node-layer]');
 const nodes=s.nodes.map(n=>({...n,children:[],row:n.cvs[cv]})),map=new Map(nodes.map(n=>[n.id,n]));
 const visited=new Set(),roots=[];
 for(const n of nodes){if(n.parent!==n.id&&map.has(n.parent))map.get(n.parent).children.push(n);else roots.push(n)}
-//Guard traversal so malformed parent cycles remain inspectable.
-let leaf=0;function place(n,depth){if(visited.has(n.id))return;visited.add(n.id);n.depth=depth;const children=n.children.filter(c=>!visited.has(c.id));children.forEach(c=>place(c,depth+1));const positioned=children.filter(c=>c.y!==undefined);n.y=positioned.length?positioned.reduce((v,c)=>v+c.y,0)/positioned.length:55+leaf++*72;}
+let leaf=0;
+function place(n,depth){
+if(visited.has(n.id))return;visited.add(n.id);n.depth=depth;
+const children=n.children.filter(c=>!visited.has(c.id));children.forEach(c=>place(c,depth+1));
+const positioned=children.filter(c=>c.y!==undefined);
+n.y=positioned.length?positioned.reduce((v,c)=>v+c.y,0)/positioned.length:55+leaf++*72;
+}
 roots.sort((a,b)=>a.id-b.id).forEach(n=>place(n,0));
 for(const n of nodes)if(!visited.has(n.id))place(n,0);
 const depth=Math.max(1,...nodes.map(n=>n.depth)),width=Math.max(520,byId('graph-wrap').clientWidth,depth*160+140),height=Math.max(230,leaf*72+40);
-svg.setAttribute('viewBox',`0 0 ${width} ${height}`);svg.style.width=width+'px';svg.style.height=height+'px';
-svg.append(el('title',{},`Snapshot ${+slider.value+1}, CV ${cv||'unknown'}, ${nodes.length-Number(map.has(0))} real nodes`));
+svg.querySelector('title').textContent=`Snapshot ${snapshot+1}, CV ${cv||'unknown'}, ${nodes.length-Number(map.has(0))} real nodes`;
 for(const n of nodes)n.x=65+n.depth*(width-140)/depth;
-const radius=n=>{if(!n.id)return 10;if(sizeSelect.value==='uniform'||!n.row)return 14;const w=n.row.weight;if(w===null)return 14;const v=sizeSelect.value==='probability'?(total>0?w/total:0)*nodes.length:w;return Math.min(27,Math.sqrt(130+170*Math.max(0,v)))};
-const defs=el('defs'),marker=el('marker',{id:'arrow',viewBox:'0 -3 6 6',refX:0,markerWidth:4,markerHeight:4,markerUnits:'strokeWidth',orient:'auto'});marker.append(el('path',{d:'M0,-3L6,0L0,3',fill:'var(--muted)'}));defs.append(marker);svg.append(defs);
-for(const n of nodes){const p=map.get(n.parent);if(!p||p===n)continue;const dx=n.x-p.x,dy=n.y-p.y,len=Math.hypot(dx,dy);if(!len)continue;
+const radius=n=>{
+if(!n.id)return 10;if(sizeSelect.value==='uniform'||!n.row)return 14;
+const w=n.row.weight;if(w===null)return 14;
+const v=sizeSelect.value==='probability'?(total>0?w/total:0)*nodes.length:w;
+return Math.min(27,Math.sqrt(130+170*Math.max(0,v)));
+};
+const before=new Map([...graphNodes].map(([id,n])=>[id,{x:n.x,y:n.y,r:n.r,opacity:n.opacity}]));
+for(const entry of graphNodes.values())entry.active=false;
+const {min:lo,max:hi}=scoreRanges[cv]||{min:Infinity,max:-Infinity};
+for(const n of nodes){
+let entry=graphNodes.get(n.id);
+if(!entry){
+//New nodes start at the nearest ancestor present in the preceding frame.
+let cursor=n.parent,ancestor=null;const seen=new Set();
+while(cursor!==undefined&&!seen.has(cursor)){
+seen.add(cursor);if(before.has(cursor)){ancestor=before.get(cursor);break}cursor=map.get(cursor)?.parent;
+}
+const start=animate&&ancestor?ancestor:{x:n.x,y:n.y};
+const g=el('g',{class:'node','data-node-id':n.id,role:'button'});
+g.append(el('circle'),el('text',{'text-anchor':'middle'}),el('text',{'text-anchor':'middle'}),el('title'));
+g.addEventListener('click',()=>selectNode(n.id));
+g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectNode(n.id)}});
+nodeLayer.append(g);
+entry={g,x:start.x,y:start.y,r:radius(n),opacity:animate?0:1};graphNodes.set(n.id,entry);
+}
+entry.active=true;entry.node=n;entry.target={x:n.x,y:n.y,r:radius(n),opacity:1};
+entry.g.setAttribute('tabindex','0');entry.g.removeAttribute('aria-hidden');
+entry.g.setAttribute('aria-label',`Node ${n.id}, score ${n.row?fmt(n.row.score):'unavailable'}`);
+entry.g.style.pointerEvents='';
+const row=n.row;let fraction=row&&hi>lo?(row.score-lo)/(hi-lo):.5;if(direction.value==='min')fraction=1-fraction;
+const fill=!n.id?'var(--line)':colorSelect.value==='id'?idColor(n.id):row?'var(--series)':'var(--line)';
+const circle=entry.g.querySelector('circle');circle.setAttribute('fill',fill);
+circle.setAttribute('fill-opacity',colorSelect.value==='score'&&n.id&&row?0.25+0.7*fraction:1);
+circle.setAttribute('stroke',n.id===selected?'var(--fg)':'none');circle.setAttribute('stroke-width',2);
+const texts=entry.g.querySelectorAll('text');texts[0].textContent=`Node ${n.id}`;texts[1].textContent=n.id?(row?fmt(row.score):'missing CV'):'virtual';
+entry.g.querySelector('title').textContent=`Node ${n.id}; parent ${n.parent}; attempts ${row?fmt(row.attempts):'—'}; successes ${row?fmt(row.successes):'—'}; weight ${row?fmt(row.weight):'—'}`;
+}
+for(const entry of graphNodes.values()){
+entry.from={x:entry.x,y:entry.y,r:entry.r,opacity:entry.opacity};
+if(!entry.active){entry.target={...entry.from,opacity:0};entry.g.setAttribute('tabindex','-1');entry.g.setAttribute('aria-hidden','true');entry.g.style.pointerEvents='none'}
+}
+for(const edge of graphEdges.values())edge.active=false;
+for(const n of nodes){
+const p=map.get(n.parent);if(!p||p===n)continue;
 const weighted=edgeSelect.value==='weight'&&p.id!==0&&p.row&&n.row&&p.row.weight!==null&&n.row.weight!==null;
 const strength=weighted?Math.min(p.row.weight,n.row.weight):null;
-//Fixed compressed scale, unchanged across snapshots and CV rotations.
 const thickness=weighted?1+4*Math.sqrt(strength/(1+strength)):1.5;
-//Anchor the arrow at its base; the shaft ends before the triangular head.
-const endGap=radius(n)+5+4*thickness;
-const line=el('line',{'data-parent':p.id,'data-child':n.id,x1:p.x+dx*(radius(p)+3)/len,y1:p.y+dy*(radius(p)+3)/len,x2:n.x-dx*endGap/len,y2:n.y-dy*endGap/len,stroke:'var(--muted)','stroke-width':thickness,'stroke-linecap':'butt','marker-end':'url(#arrow)'});
-line.append(el('title',{},weighted?`Node ${p.id} → ${n.id}; smaller endpoint weight ${fmt(strength)}`:`Node ${p.id} → ${n.id}; uniform width`));svg.append(line);}
-const {min:lo,max:hi}=scoreRanges[cv]||{min:Infinity,max:-Infinity};
-for(const n of nodes){const row=n.row;let fraction=row&&hi>lo?(row.score-lo)/(hi-lo):.5;if(direction.value==='min')fraction=1-fraction;
-const g=el('g',{transform:`translate(${n.x},${n.y})`,class:'node',tabindex:0,role:'button','aria-label':`Node ${n.id}, score ${row?fmt(row.score):'unavailable'}`});
-const fill=!n.id?'var(--line)':colorSelect.value==='id'?idColor(n.id):row?'var(--series)':'var(--line)';
-g.append(el('circle',{r:radius(n),fill,'fill-opacity':colorSelect.value==='score'&&n.id&&row?0.25+0.7*fraction:1,stroke:n.id===selected?'var(--fg)':'none','stroke-width':2}));
-g.append(el('text',{'text-anchor':'middle',y:-radius(n)-7},`Node ${n.id}`));g.append(el('text',{'text-anchor':'middle',y:radius(n)+17},n.id?(row?fmt(row.score):'missing CV'):'virtual'));
-g.append(el('title',{},`Node ${n.id}; parent ${n.parent}; attempts ${row?fmt(row.attempts):'—'}; successes ${row?fmt(row.successes):'—'}; weight ${row?fmt(row.weight):'—'}`));
-g.addEventListener('click',()=>selectNode(n.id));g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectNode(n.id)}});svg.append(g);}
+let edge=graphEdges.get(n.id);
+if(!edge){
+const line=el('line',{stroke:'var(--muted)','stroke-linecap':'butt','marker-end':'url(#arrow)'});line.append(el('title'));edgeLayer.append(line);
+edge={line,parent:n.parent,child:n.id,width:thickness,opacity:animate?0:1,attach:null};graphEdges.set(n.id,edge);
 }
+edge.fromWidth=edge.width;edge.targetWidth=thickness;edge.fromOpacity=edge.opacity;edge.targetOpacity=1;
+//A reconnection moves the parent end from its currently displayed attachment.
+edge.reconnect=edge.parent!==n.parent||(animate&&edge.reconnect);
+edge.fromAttach=edge.attach?{...edge.attach}:null;
+edge.parent=n.parent;edge.active=true;
+edge.line.setAttribute('data-parent',p.id);edge.line.setAttribute('data-child',n.id);
+edge.line.querySelector('title').textContent=weighted?`Node ${p.id} → ${n.id}; smaller endpoint weight ${fmt(strength)}`:`Node ${p.id} → ${n.id}; uniform width`;
+}
+for(const edge of graphEdges.values())if(!edge.active){
+edge.fromWidth=edge.width;edge.targetWidth=edge.width;edge.fromOpacity=edge.opacity;edge.targetOpacity=0;edge.reconnect=false;
+}
+const startSize=graphSize||{width,height},lerp=(a,b,t)=>a+(b-a)*t;
+function render(t){
+graphSize={width:lerp(startSize.width,width,t),height:lerp(startSize.height,height,t)};
+svg.setAttribute('viewBox',`0 0 ${graphSize.width} ${graphSize.height}`);svg.style.width=graphSize.width+'px';svg.style.height=graphSize.height+'px';
+for(const entry of graphNodes.values()){
+for(const key of ['x','y','r','opacity'])entry[key]=lerp(entry.from[key],entry.target[key],t);
+entry.g.setAttribute('transform',`translate(${entry.x},${entry.y})`);entry.g.setAttribute('opacity',entry.opacity);
+entry.g.querySelector('circle').setAttribute('r',entry.r);
+const texts=entry.g.querySelectorAll('text');texts[0].setAttribute('y',-entry.r-7);texts[1].setAttribute('y',entry.r+17);
+}
+for(const edge of graphEdges.values()){
+const p=graphNodes.get(edge.parent),n=graphNodes.get(edge.child);if(!p||!n){edge.line.setAttribute('visibility','hidden');continue}
+edge.width=lerp(edge.fromWidth,edge.targetWidth,t);edge.opacity=lerp(edge.fromOpacity,edge.targetOpacity,t);
+const attachment=edge.reconnect&&edge.fromAttach?{x:lerp(edge.fromAttach.x,p.x,t),y:lerp(edge.fromAttach.y,p.y,t),r:lerp(edge.fromAttach.r,p.r,t)}:{x:p.x,y:p.y,r:p.r};
+edge.attach=attachment;
+const dx=n.x-attachment.x,dy=n.y-attachment.y,len=Math.hypot(dx,dy),startGap=attachment.r+3,endGap=n.r+5+4*edge.width;
+edge.line.setAttribute('stroke-width',edge.width);
+edge.line.setAttribute('opacity',Math.min(edge.opacity,p.opacity,n.opacity));
+//Hide an edge while emerging nodes overlap, rather than drawing it backwards.
+if(len<=startGap+endGap){edge.line.setAttribute('visibility','hidden');continue}
+edge.line.removeAttribute('visibility');
+edge.line.setAttribute('x1',attachment.x+dx*startGap/len);edge.line.setAttribute('y1',attachment.y+dy*startGap/len);
+edge.line.setAttribute('x2',n.x-dx*endGap/len);edge.line.setAttribute('y2',n.y-dy*endGap/len);
+}
+}
+function finish(){
+render(1);graphFrame=null;
+for(const [id,entry] of graphNodes)if(!entry.active){entry.g.remove();graphNodes.delete(id)}
+for(const [id,edge] of graphEdges){if(!edge.active){edge.line.remove();graphEdges.delete(id)}else edge.reconnect=false}
+}
+graphSnapshot=snapshot;
+const seconds=Number(delayInput.value),duration=Math.min(500,700*(Number.isFinite(seconds)&&seconds>0?seconds:0.9));
+graphTransition={render,finish,duration};
+if(!animate){finish();return}
+if(exportRunning){render(0);return}
+const started=performance.now();render(0);
+function frame(now){
+const progress=Math.min(1,Math.max(0,(now-started)/duration)),eased=progress*progress*(3-2*progress);
+render(eased);
+if(progress<1)graphFrame=requestAnimationFrame(frame);else finish();
+}
+graphFrame=requestAnimationFrame(frame);
+}
+
+function drawSpread(cv){
+const svg=byId('spread'),points=histories[cv]||[],p=points[+slider.value];
+byId('spread-summary').textContent=p&&p.count?`${cv} · Minimum ${fmt(p.min)} · Maximum ${fmt(p.max)} · Range ${fmt(p.max-p.min)} · Median ${fmt(p.median)} · ${p.count} scored nodes`:`${cv||'Selected CV'} · No retained scores reported in this snapshot`;
+const width=Math.max(300,svg.clientWidth),height=265,m={left:66,right:24,top:22,bottom:52};
+const x=v=>m.left+(v-1)/Math.max(1,data.length-1)*(width-m.left-m.right);
+const key=JSON.stringify([cv,width]),current=svg.querySelector('[data-current-snapshot]');
+if(spreadCacheKey===key&&current){current.setAttribute('x1',x(+slider.value+1));current.setAttribute('x2',x(+slider.value+1));return}
+spreadCacheKey=key;svg.replaceChildren();svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
+let lo=Infinity,hi=-Infinity;for(const p of points)if(p.count){lo=Math.min(lo,p.min);hi=Math.max(hi,p.max)}
+if(!Number.isFinite(lo)){svg.append(el('text',{x:width/2,y:80,'text-anchor':'middle'},'No retained scores available for this CV'));return}
+const pad=(hi-lo)*.1||Math.max(1,Math.abs(lo)*.05);lo-=pad;hi+=pad;
+const y=v=>height-m.bottom-(v-lo)/(hi-lo)*(height-m.top-m.bottom);
+svg.append(el('rect',{x:m.left,y:m.top,width:width-m.left-m.right,height:height-m.top-m.bottom,fill:'none',stroke:'var(--line)'}));
+for(let i=0;i<5;i++){const v=lo+(hi-lo)*i/4,yy=y(v);svg.append(el('line',{x1:m.left,x2:width-m.right,y1:yy,y2:yy,stroke:'var(--line)','stroke-opacity':.35}));svg.append(el('text',{x:m.left-9,y:yy+4,'text-anchor':'end'},fmt(v)))}
+const count=width<450?3:6,ticks=[...new Set(Array.from({length:count},(_,i)=>Math.round(1+(data.length-1)*i/(count-1))))];
+for(const tick of ticks)svg.append(el('text',{x:x(tick),y:height-m.bottom+21,'text-anchor':'middle'},data[tick-1].cycle??tick));
+svg.append(el('text',{x:(m.left+width-m.right)/2,y:height-8,'text-anchor':'middle'},'Cycle (snapshots in log order)'));
+svg.append(el('text',{transform:`translate(17,${(m.top+height-m.bottom)/2}) rotate(-90)`,'text-anchor':'middle'},'CV score'));
+//Separate segments prevent interpolation across snapshots with missing CV data.
+let segment=[];
+function flush(){if(!segment.length)return;
+const upper=segment.map(p=>`${x(p.x)},${y(p.max)}`),lower=segment.slice().reverse().map(p=>`${x(p.x)},${y(p.min)}`);
+svg.append(el('path',{d:'M'+upper.join('L')+'L'+lower.join('L')+'Z',fill:'var(--other)','fill-opacity':.18,stroke:'none'}));
+for(const field of ['min','max','median'])svg.append(el('path',{d:'M'+segment.map(p=>`${x(p.x)},${y(p[field])}`).join('L'),fill:'none',stroke:field==='median'?'var(--series)':'var(--other)','stroke-width':field==='median'?2:1}));segment=[];
+}
+for(const p of points){if(p.count)segment.push(p);else flush()}flush();
+for(const p of points)if(p.count){
+const g=el('g',{role:'button',tabindex:0,'aria-label':`Cycle ${p.s.cycle}, minimum ${p.min}, maximum ${p.max}, median ${p.median}`});
+g.append(el('line',{x1:x(p.x),x2:x(p.x),y1:y(p.min),y2:y(p.max),stroke:'var(--other)','stroke-width':2}));
+g.append(el('circle',{cx:x(p.x),cy:y(p.median),r:10,fill:'transparent'}));g.append(el('circle',{cx:x(p.x),cy:y(p.median),r:3,fill:'var(--series)'}));
+g.append(el('title',{},`Snapshot ${p.x}; cycle ${p.s.cycle}; ${cv}: minimum ${fmt(p.min)}, maximum ${fmt(p.max)}, median ${fmt(p.median)}; ${p.count} nodes`));
+const choose=()=>{if(exportRunning)return;stop();slider.value=p.x-1;draw()};g.addEventListener('click',choose);g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose()}});svg.append(g);
+}
+svg.append(el('line',{'data-current-snapshot':'',x1:x(+slider.value+1),x2:x(+slider.value+1),y1:m.top,y2:height-m.bottom,stroke:'var(--fg)','stroke-opacity':.4}));
+}
+
 function drawTrend(cv){
 const svg=byId('trend'),width=Math.max(300,svg.clientWidth),height=265,m={left:66,right:24,top:22,bottom:52};
 const x=v=>m.left+(v-1)/Math.max(1,data.length-1)*(width-m.left-m.right);
@@ -311,7 +463,7 @@ for(const [key,color] of [['record','var(--series)'],['pool','var(--other)']]){l
 for(const p of points)if(p[key]!==null){const g=el('g',{role:'button',tabindex:0,'aria-label':`Snapshot ${p.x}, ${key} score ${p[key]}`});g.append(el('circle',{cx:x(p.x),cy:y(p[key]),r:10,fill:'transparent'}));g.append(el('circle',{cx:x(p.x),cy:y(p[key]),r:3,fill:color}));g.append(el('title',{},`Snapshot ${p.x}; cycle ${p.s.cycle}; ${key==='record'?'recorded best':'pool best'} ${p[key]}`));const choose=()=>{slider.value=p.x-1;draw()};g.addEventListener('click',choose);g.addEventListener('keydown',e=>{if(e.key==='Enter'){choose()}});svg.append(g);}}
 svg.append(el('line',{'data-current-snapshot':'',x1:x(+slider.value+1),x2:x(+slider.value+1),y1:m.top,y2:height-m.bottom,stroke:'var(--fg)','stroke-opacity':.4}));
 }
-function draw(){const i=+slider.value,s=data[i],cv=activeCv(s);if(cv!==lastCv){direction.value=cvDirections[cv]||'min';lastCv=cv}
+function draw(){if(exportRunning&&!exportStepping)return;const i=+slider.value,s=data[i],cv=activeCv(s);if(cv!==lastCv){direction.value=cvDirections[cv]||'min';lastCv=cv}
 byId('color-legend').textContent=colorSelect.value==='id'?'Color identifies node ID; neighboring IDs use contrasting hues':'Darker fill = better score on a fixed scale per CV';
 byId('edge-legend').textContent=edgeSelect.value==='weight'?'Thicker edges = both endpoints more strongly weighted (compressed scale); root edges uniform':'Edges have uniform width';
 byId('position').textContent=`${i+1} / ${data.length}`;byId('prev').disabled=i===0;byId('next').disabled=i===data.length-1;
@@ -320,15 +472,140 @@ let total=0,complete=true;for(const n of s.nodes){if(!n.id)continue;const row=n.
 if(!complete)total=null;
 const tbody=byId('rows');tbody.replaceChildren();for(const n of s.nodes){const r=n.cvs[cv],tr=document.createElement('tr');tr.className=n.id===selected?'selected':'';const cells=[n.id,n.parent,n.id?(r?fmt(r.score):'—'):'virtual',r?fmt(r.attempts):'—',r?fmt(r.successes):'—',r?fmt(r.weight):'—',r&&total>0?(100*r.weight/total).toFixed(2)+'%':'—'];for(const value of cells){const td=document.createElement('td');td.textContent=value;tr.append(td)}tr.addEventListener('click',()=>selectNode(n.id));tbody.append(tr)}
 const node=s.nodes.find(n=>n.id===selected),r=node?.cvs[cv];byId('selected').textContent=node?`Node ${node.id} · Parent ${node.parent} · Attempts ${r?fmt(r.attempts):'—'} · Successes ${r?fmt(r.successes):'—'} · Weight ${r?fmt(r.weight):'—'}`:selected!==null?`Node ${selected} is absent from this snapshot.`:'Select a node to inspect its counters.';
-drawGraph(s,cv,total);drawTrend(cv);
+drawGraph(s,cv,total);drawSpread(cv);drawTrend(cv);
 }
 byId('prev').addEventListener('click',()=>{stop();slider.value=Math.max(0,+slider.value-1);draw()});byId('next').addEventListener('click',()=>{stop();slider.value=Math.min(data.length-1,+slider.value+1);draw()});slider.addEventListener('input',()=>{stop();draw()});
 byId('play').addEventListener('click',()=>{if(timer){stop();return}if(!delayInput.checkValidity()){delayInput.reportValidity();return}if(+slider.value===data.length-1){slider.value=0;draw()}byId('play').textContent='Pause';schedule()});
+function adjustDelay(change){
+const value=Number(delayInput.value),base=delayInput.value.trim()&&Number.isFinite(value)?value:report.delay??0.9;
+delayInput.value=String(Math.round(Math.max(0.05,Math.min(60,base+change))*1000000)/1000000);
+delayInput.dispatchEvent(new Event('input'));
+}
+byId('delay-down').addEventListener('click',()=>adjustDelay(-0.05));
+byId('delay-up').addEventListener('click',()=>adjustDelay(0.05));
 delayInput.addEventListener('input',()=>{if(delayInput.checkValidity()&&timer)schedule()});
 delayInput.addEventListener('change',()=>{if(!delayInput.checkValidity()){stop();delayInput.reportValidity()}});
 cvSelect.addEventListener('change',draw);direction.addEventListener('change',()=>{const cv=activeCv(data[+slider.value]);if(cv)cvDirections[cv]=direction.value;draw()});sizeSelect.addEventListener('change',draw);
+motionInput.addEventListener('change',draw);
+if(reducedMotion&&reducedMotion.addEventListener)reducedMotion.addEventListener('change',draw);
 edgeSelect.addEventListener('change',draw);colorSelect.addEventListener('change',draw);
 if(colorTheme&&colorTheme.addEventListener)colorTheme.addEventListener('change',draw);
+//GIF89a encoder: fixed 256-color RGB palette and GIF LZW compression.
+//All frames cover the full canvas; no external libraries or services are used.
+function gifLzw(pixels){
+const bytes=[];let buffer=0,bits=0,size=9,next=258,dict=new Map();
+function emit(code){
+buffer|=code<<bits;bits+=size;
+while(bits>=8){bytes.push(buffer&255);buffer>>>=8;bits-=8}
+//The decoder builds its dictionary one code later than the encoder.
+if(next>=(1<<size)&&size<12)size++;
+}
+emit(256);let prefix=pixels[0];
+for(let i=1;i<pixels.length;i++){
+const value=pixels[i],key=prefix*256+value,found=dict.get(key);
+if(found!==undefined){prefix=found;continue}
+emit(prefix);
+if(next<4096)dict.set(key,next++);
+else{emit(256);dict=new Map();next=258;size=9}
+prefix=value;
+}
+emit(prefix);emit(257);if(bits)bytes.push(buffer&255);
+return Uint8Array.from(bytes);
+}
+function gifEncoder(width,height){
+const chunks=[],word=n=>[n&255,(n>>8)&255],ascii=s=>Array.from(s,c=>c.charCodeAt(0));
+const palette=[];
+for(let i=0;i<256;i++)palette.push(Math.round((i>>5)*255/7),Math.round(((i>>2)&7)*255/7),Math.round((i&3)*255/3));
+chunks.push(Uint8Array.from([...ascii('GIF89a'),...word(width),...word(height),247,0,0,...palette,33,255,11,...ascii('NETSCAPE2.0'),3,1,0,0,0]));
+return {
+add(rgba,delay){
+const pixels=new Uint8Array(width*height);
+for(let i=0,j=0;i<pixels.length;i++,j+=4)pixels[i]=(rgba[j]&224)|((rgba[j+1]>>3)&28)|(rgba[j+2]>>6);
+const compressed=gifLzw(pixels),header=[33,249,4,4,...word(delay),0,0,44,0,0,0,0,...word(width),...word(height),0,8];
+chunks.push(Uint8Array.from(header));
+for(let i=0;i<compressed.length;i+=255){const block=compressed.subarray(i,i+255);chunks.push(Uint8Array.of(block.length),block)}
+chunks.push(Uint8Array.of(0));
+},
+finish(){return new Blob([...chunks,Uint8Array.of(59)],{type:'image/gif'})}
+};
+}
+function gifBounds(){
+let width=Math.max(520,byId('graph-wrap').clientWidth),height=230;
+for(const s of data){
+const nodes=new Map(s.nodes.map(n=>[n.id,n])),children=new Map(s.nodes.map(n=>[n.id,0]));let depth=0;
+for(const n of s.nodes){if(nodes.has(n.parent)&&n.parent!==n.id)children.set(n.parent,children.get(n.parent)+1);
+let cursor=n,steps=0,seen=new Set([n.id]);
+while(nodes.has(cursor.parent)&&!seen.has(cursor.parent)){cursor=nodes.get(cursor.parent);seen.add(cursor.id);steps++}
+depth=Math.max(depth,steps);
+}
+const leaves=Math.max(1,[...children.values()].filter(n=>n===0).length);
+width=Math.max(width,Math.max(1,depth)*160+140);height=Math.max(height,leaves*72+40);
+}
+const scale=Math.min(1,1200/Math.max(width,height));
+return {width,height,pixelsWide:Math.max(1,Math.round(width*scale)),pixelsHigh:Math.max(1,Math.round(height*scale))};
+}
+async function gifPixels(canvas,context,bounds){
+const original=byId('graph'),clone=original.cloneNode(true);
+const originals=[original,...original.querySelectorAll('*')],copies=[clone,...clone.querySelectorAll('*')];
+const properties=['fill','stroke','stroke-width','fill-opacity','stroke-opacity','opacity','font-family','font-size','font-weight','text-anchor','visibility'];
+for(let i=0;i<originals.length;i++){
+const computed=getComputedStyle(originals[i]);
+for(const property of properties)copies[i].style.setProperty(property,computed.getPropertyValue(property));
+}
+clone.setAttribute('xmlns',NS);clone.setAttribute('viewBox',`0 0 ${bounds.width} ${bounds.height}`);
+clone.setAttribute('width',canvas.width);clone.setAttribute('height',canvas.height);
+clone.style.width=canvas.width+'px';clone.style.height=canvas.height+'px';
+const blob=new Blob([new XMLSerializer().serializeToString(clone)],{type:'image/svg+xml;charset=utf-8'}),url=URL.createObjectURL(blob);
+try{
+const image=await new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error('Could not rasterize the graph.'));img.src=url});
+context.fillStyle=getComputedStyle(document.body).backgroundColor;context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(image,0,0,canvas.width,canvas.height);
+return context.getImageData(0,0,canvas.width,canvas.height).data;
+}finally{URL.revokeObjectURL(url)}
+}
+async function renderGif(){
+if(exportRunning){exportAbort=true;byId('export-status').textContent='Cancelling GIF rendering…';return}
+if(!delayInput.checkValidity()){delayInput.reportValidity();return}
+stop();if(graphFrame!==null){cancelAnimationFrame(graphFrame);graphFrame=null}if(graphTransition)graphTransition.finish();
+const savedSnapshot=slider.value,savedMotion=motionInput.checked,controls=[...document.querySelectorAll('main button, main input, main select')].filter(n=>n.id!=='render-gif'),disabled=controls.map(n=>n.disabled);
+const button=byId('render-gif'),status=byId('export-status');
+exportRunning=true;exportAbort=false;controls.forEach(n=>n.disabled=true);button.textContent='Cancel render';
+const delay=Math.max(1,Math.round(Number(delayInput.value)*100));let frames=0;
+function step(index){slider.value=index;exportStepping=true;try{draw()}finally{exportStepping=false}}
+try{
+const bounds=gifBounds(),canvas=document.createElement('canvas');canvas.width=bounds.pixelsWide;canvas.height=bounds.pixelsHigh;
+const context=canvas.getContext('2d',{willReadFrequently:true}),encoder=gifEncoder(canvas.width,canvas.height);
+async function capture(hold){if(exportAbort)return;const pixels=await gifPixels(canvas,context,bounds);if(exportAbort)return;encoder.add(pixels,hold);frames++}
+if(!context)throw new Error('Canvas rendering is unavailable in this browser.');
+if(document.fonts&&document.fonts.ready)await document.fonts.ready;
+for(let i=0;i<data.length&&!exportAbort;i++){
+status.textContent=`Rendering GIF: snapshot ${i+1} / ${data.length} · ${frames} frames`;
+//The first snapshot appears immediately, with no transition from the viewer.
+motionInput.checked=i===0?false:savedMotion;step(i);
+const transition=graphTransition;
+const smooth=i>0&&savedMotion&&!(reducedMotion&&reducedMotion.matches);
+if(smooth){
+const motionDelay=Math.max(1,Math.min(delay,Math.round(transition.duration/10))),count=Math.min(motionDelay,Math.max(1,Math.ceil(transition.duration/80)));
+for(let j=0;j<count&&!exportAbort;j++){
+const t=(j+1)/count;transition.render(t*t*(3-2*t));
+const hold=Math.floor((j+1)*motionDelay/count)-Math.floor(j*motionDelay/count)+(j===count-1?delay-motionDelay:0);
+await capture(hold);
+}
+transition.finish();
+}else{transition.finish();await capture(delay)}
+await new Promise(resolve=>setTimeout(resolve,0));
+}
+if(exportAbort){status.textContent='GIF rendering cancelled.';return}
+const gif=encoder.finish(),url=URL.createObjectURL(gif),link=document.createElement('a');link.href=url;link.download='swarm-pool.gif';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+status.textContent=`GIF ready · ${frames} frames · ${canvas.width} × ${canvas.height} pixels`;
+}catch(error){status.textContent='GIF rendering failed: '+error.message}
+finally{
+if(graphFrame!==null){cancelAnimationFrame(graphFrame);graphFrame=null}
+exportRunning=false;exportStepping=false;motionInput.checked=savedMotion;slider.value=savedSnapshot;
+graphSnapshot=null;controls.forEach((n,i)=>n.disabled=disabled[i]);button.textContent='Render GIF';draw();
+}
+}
+byId('render-gif').addEventListener('click',renderGif);
+
 window.addEventListener('resize',draw);draw();
 </script></body></html>'''
 

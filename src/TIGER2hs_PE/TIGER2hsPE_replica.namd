@@ -963,6 +963,7 @@ proc swarm_pool_drop {pool_data seed_cv cv_names decay} {
         }]
 
         #Preserve turning points in the active CV
+        #Direction reversal due to rotating CVs
         if {$left * $right < 0.0} {continue}
 
         set cost [expr {2.0 * abs($left) * abs($right)}]
@@ -971,9 +972,7 @@ proc swarm_pool_drop {pool_data seed_cv cv_names decay} {
             set lowest_cost $cost
 
             set gap [expr {abs($left) + abs($right)}]
-            set fraction [expr {
-                $gap > 0.0 ? abs($right) / $gap : 0.5
-            }]
+            set fraction [expr { $gap > 0.0 ? abs($right) / $gap : 0.5 }]
             set recipients [list $parent $child]
             set fractions [list $fraction [expr {1.0 - $fraction}]]
         }
@@ -1028,10 +1027,7 @@ proc swarm_pool_drop {pool_data seed_cv cv_names decay} {
 
         foreach cv $cv_names {
             foreach counter {seed_attempted seed_successful} {
-                set pool($recipient.${counter}_$cv) [expr {
-                    $pool($recipient.${counter}_$cv)
-                    + $fraction * $pool($selected.${counter}_$cv)
-                }]
+                set pool($recipient.${counter}_$cv) [expr { $pool($recipient.${counter}_$cv) + $fraction * $pool($selected.${counter}_$cv) }]
             }
         }
     }
@@ -1703,7 +1699,7 @@ while {$i_run < $num_runs} {
                     puts stderr "OLD_SEED $seed_next $swarm(seed_accepted_${seed_cv}) [lindex $swarm(seed_best_${seed_cv}) 0] [lindex $swarm(seed_best_${seed_cv}) 1]"
                 }
                 
-                #Maintain a structure pool?
+                #Maintain a graphed structure pool?
                 if {$swarmpoolsize} {
                 
                     set seed_ids    [SArray::keys   scores]
@@ -1714,7 +1710,7 @@ while {$i_run < $num_runs} {
                         set origin_node $swarm_pool($key.origin)
                         if {$origin_node == 0 || $swarm_pool(best_$seed_cv) eq "False"} {continue}
 
-                        #global improvement, register successful pool seeding
+                        #global improvement? register successful pool seeding
                         if {[eval swarm_opt_$seed_opt $value $swarm_pool(best_$seed_cv)]} {
                             set swarm_pool($origin_node.seed_successful_$seed_cv) [expr { $swarm_pool($origin_node.seed_successful_$seed_cv) + 1.0 }]
                         }
@@ -1770,6 +1766,7 @@ while {$i_run < $num_runs} {
                                 incr i
                             }
                             
+                            #copy files into pool
                             file copy -force [format "$output_root.offer.$key.coor" ""] "$pool_output_root/$node_id.coor"
                             file copy -force [format "$output_root.offer.$key.vel"  ""] "$pool_output_root/$node_id.vel" 
                             file copy -force [format "$output_root.offer.$key.xsc"  ""] "$pool_output_root/$node_id.xsc"
@@ -1784,10 +1781,17 @@ while {$i_run < $num_runs} {
                             incr    swarm_pool(next_node)
                         }
                     }
+
+                    #Transfer origin for replicas being re-seeded outside structure pool
+                    #This also transfers continued lineages from new nodes added above
+                    foreach i $rused {
+                        set swarm_pool($i.origin) $swarm_pool($seed_rep.origin)
+                    }
                     
                     #Consolidate graphed pool
                     while {[llength $swarm_pool(nodes)] - 1 > $swarmpoolsize} {
-                        #call dropper
+
+                        #drop nodes based on least cost in CV space or prune tips if needed based on weight inversly
                         lassign [swarm_pool_drop [array get swarm_pool] $seed_cv [array names swarm_colvars] $swarmpooldecay] pool_data removed_id replacement
 
                         #nothing could be trimmed
@@ -1826,7 +1830,7 @@ while {$i_run < $num_runs} {
                             set rid [rselect $num_replicas $rused]
                             lappend rused $rid
                             
-                            #select pool state
+                            #select random pool state based on success weighting
                             set pool_id [swarm_pool_pick [array get swarm_pool] $seed_cv $swarmpooldecay]
                             
                             puts "Info: SWARM - $seed_caption - SEEDING REPLICA $rid FROM POOL STRUCTURE $pool_id"
@@ -1844,7 +1848,7 @@ while {$i_run < $num_runs} {
                                 set seed_msg [list POOL $pool_id]
                             }
                         }
-                    }  
+                    }
                 }
                 
                 #Send all remaining replica the -1 signal
