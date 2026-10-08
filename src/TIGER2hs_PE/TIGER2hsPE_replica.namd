@@ -843,6 +843,14 @@ proc swarm_opt_max {val1 val2} {
     return [expr $val1 > $val2]
 }
 
+#Weighted successes
+proc swarm_weight_min {val1 val2} {
+    return [expr 1. * $val2 / $val1]
+}
+proc swarm_weight_max {val1 val2} {
+    return [expr 1. * $val1 / $val2]
+}
+
 #Limit helper functions
 proc swarm_limit_min {val lim} {
     return [expr $val <= $lim]
@@ -1138,6 +1146,9 @@ if {[info exists swarmcycle] && $swarmcycle > 0} {
         set pool_output_root "swarm-pool"
         if {![file exists $pool_output_root] && $replica_id == 0} {
             puts "Info: SWARM - SETTING UP GRAPHED STRUCTURE POOL (decay $swarmpooldecay)"
+            puts "Info: SWARM - POOL SEEDING PROPORTIONAL TO STAGNATION"
+            puts "Info: SWARM - LOCAL  SUCCESS ACCOUNTING WITH IMPROVEMENT-WEIGHTING"
+            puts "Info: SWARM - GLOBAL SUCCESS ACCOUNTING WITH IMPROVEMENT-WEIGHTING PROPORTIONAL TO STAGNATION"
             file mkdir $pool_output_root
         } else {
             puts "Warn: SWARM - USING EXISTING STRUCTURE POOL - BE CAUTIOUS"
@@ -1708,11 +1719,15 @@ while {$i_run < $num_runs} {
                     #Track replicas and injected nodes for gobal improvements
                     foreach key $seed_ids value $seed_scores {
                         set origin_node $swarm_pool($key.origin)
-                        if {$origin_node == 0 || $swarm_pool(best_$seed_cv) eq "False"} {continue}
 
-                        #global improvement? register successful pool seeding with stronger weight propotional to stagnation
+                        #Increase attempts counter (every cycle is an attempt)
+                        if {$origin_node == 0} {continue}
+                        set swarm_pool($origin_node.seed_attempted_$seed_cv) [expr { $swarm_pool($origin_node.seed_attempted_$seed_cv) + 1.0 }]
+
+                        #global improvement? register successful pool seeding with stronger weight propotional to stagnation and the improvment made
+                        if {$swarm_pool(best_$seed_cv) eq "False"} {continue}
                         if {[eval swarm_opt_$seed_opt $value $swarm_pool(best_$seed_cv)]} {
-                            set swarm_pool($origin_node.seed_successful_$seed_cv) [expr { $swarm_pool($origin_node.seed_successful_$seed_cv) + (1. / $swarm(seed_prob_${seed_cv})) }]
+                            set swarm_pool($origin_node.seed_successful_$seed_cv) [expr { $swarm_pool($origin_node.seed_successful_$seed_cv) + ([eval swarm_weight_$seed_opt $value $swarm_pool(best_$seed_cv)] / $swarm(seed_prob_${seed_cv})) }]
                         }
                     }
                     
@@ -1720,26 +1735,6 @@ while {$i_run < $num_runs} {
                     foreach value [SArray::values scores] {
                         if {$swarm_pool(best_$seed_cv) eq "False" || [eval swarm_opt_$seed_opt $value $swarm_pool(best_$seed_cv)]} {
                             set swarm_pool(best_$seed_cv) $value
-                        }
-                    }
-                    
-                    #Report on the graph
-                    puts stderr [format "%-12s %8s %10s %10s %20s %12s %12s %12s %14s" "SWARM_POOL" "Cycle" "Node" "Parent" "CV" "Score" "Attempts" "Successes" "Weight"]
-                    foreach node_id $swarm_pool(nodes) {
-                        foreach iterate_seed_cv [array names swarm_colvars] {
-                            set attempted  $swarm_pool($node_id.seed_attempted_$iterate_seed_cv)
-                            set successful $swarm_pool($node_id.seed_successful_$iterate_seed_cv)
-
-                            set weight 0.0
-                            if {$node_id != 0} {
-                                set weight [expr { pow(($successful + 1.0) / ($attempted + 1.0), $swarmpooldecay) }]
-                            }
-
-                            puts stderr [format "%-12s %8d %10d %10d %20s %12.6g %12.6g %12.6g %14.8g" \
-                                "SWARM_POOL" $swarm(seed_accepted_${seed_cv}) $node_id \
-                                $swarm_pool($node_id.parent) $iterate_seed_cv \
-                                $swarm_pool($node_id.score_$iterate_seed_cv) \
-                                $attempted $successful $weight]
                         }
                     }
                 
@@ -1750,11 +1745,13 @@ while {$i_run < $num_runs} {
                         set origin_node   $swarm_pool($key.origin)
                         set origin_score  $swarm_pool($origin_node.score_$seed_cv)
                         
-                        #Is better than origin node?
+                        #Is better than origin node or is the root node?
                         if {$origin_node == 0 || [eval swarm_opt_$seed_opt $value $origin_score]} {
 
-                            #count the local success
-                            set swarm_pool($origin_node.seed_successful_$seed_cv) [expr { $swarm_pool($origin_node.seed_successful_$seed_cv) + 1.0 }]
+                            #count the local success weighted by the improvement made but not for root node
+                            if {$origin_node != 0} {
+                                set swarm_pool($origin_node.seed_successful_$seed_cv) [expr { $swarm_pool($origin_node.seed_successful_$seed_cv) + [eval swarm_weight_$seed_opt $value $origin_score] }]
+                            }
                             
                             #add new node due to local improvement
                             set node_id $swarm_pool(next_node)
@@ -1816,6 +1813,26 @@ while {$i_run < $num_runs} {
 
                         puts "Info: SWARM - $seed_caption - POOL NODE $removed_id DROPPED - REPLACEMENT $replacement"
                     }
+
+                    #Report on the graph
+                    puts stderr [format "%-12s %8s %10s %10s %20s %12s %12s %12s %14s" "SWARM_POOL" "Cycle" "Node" "Parent" "CV" "Score" "Attempts" "Successes" "Weight"]
+                    foreach node_id $swarm_pool(nodes) {
+                        foreach iterate_seed_cv [array names swarm_colvars] {
+                            set attempted  $swarm_pool($node_id.seed_attempted_$iterate_seed_cv)
+                            set successful $swarm_pool($node_id.seed_successful_$iterate_seed_cv)
+
+                            set weight 0.0
+                            if {$node_id != 0} {
+                                set weight [expr { pow(($successful + 1.0) / ($attempted + 1.0), $swarmpooldecay) }]
+                            }
+
+                            puts stderr [format "%-12s %8d %10d %10d %20s %12.6g %12.6g %12.6g %14.8g" \
+                                "SWARM_POOL" $swarm(seed_accepted_${seed_cv}) $node_id \
+                                $swarm_pool($node_id.parent) $iterate_seed_cv \
+                                $swarm_pool($node_id.score_$iterate_seed_cv) \
+                                $attempted $successful $weight]
+                        }
+                    }
                                         
                     #Seed randomly selected replicas with randomly selected but weighted pool structure
                     #Anti-proportional to success_rate of seeding cycles -> escape stagnation
@@ -1837,9 +1854,6 @@ while {$i_run < $num_runs} {
                             set pool_id [swarm_pool_pick [array get swarm_pool] $seed_cv $swarmpooldecay]
                             
                             puts "Info: SWARM - $seed_caption - SEEDING REPLICA $rid FROM POOL STRUCTURE $pool_id"
-                            
-                            #Increase attempts counter
-                            set swarm_pool($pool_id.seed_attempted_$seed_cv) [expr { $swarm_pool($pool_id.seed_attempted_$seed_cv) + 1.0 }]
                             
                             #Update replicas origin to continue lineage from here
                             set swarm_pool($rid.origin) $pool_id
