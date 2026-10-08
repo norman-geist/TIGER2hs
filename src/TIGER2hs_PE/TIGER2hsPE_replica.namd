@@ -1710,9 +1710,9 @@ while {$i_run < $num_runs} {
                         set origin_node $swarm_pool($key.origin)
                         if {$origin_node == 0 || $swarm_pool(best_$seed_cv) eq "False"} {continue}
 
-                        #global improvement? register successful pool seeding
+                        #global improvement? register successful pool seeding with stronger weight propotional to stagnation
                         if {[eval swarm_opt_$seed_opt $value $swarm_pool(best_$seed_cv)]} {
-                            set swarm_pool($origin_node.seed_successful_$seed_cv) [expr { $swarm_pool($origin_node.seed_successful_$seed_cv) + 1.0 }]
+                            set swarm_pool($origin_node.seed_successful_$seed_cv) [expr { $swarm_pool($origin_node.seed_successful_$seed_cv) + (1. / $swarm(seed_prob_${seed_cv})) }]
                         }
                     }
                     
@@ -1751,7 +1751,10 @@ while {$i_run < $num_runs} {
                         set origin_score  $swarm_pool($origin_node.score_$seed_cv)
                         
                         #Is better than origin node?
-                        if {$origin_node == 0 || [eval swarm_opt_$seed_opt $value $origin_score]} {                                                         
+                        if {$origin_node == 0 || [eval swarm_opt_$seed_opt $value $origin_score]} {
+
+                            #count the local success
+                            set swarm_pool($origin_node.seed_successful_$seed_cv) [expr { $swarm_pool($origin_node.seed_successful_$seed_cv) + 1.0 }]
                             
                             #add new node due to local improvement
                             set node_id $swarm_pool(next_node)
