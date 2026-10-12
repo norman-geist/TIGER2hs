@@ -17,10 +17,14 @@ Graph views fit the page width or screen without internal scrollbars.
 Pool CV spread shows the retained score range and median, excluding virtual root 0.
 Replica CV spread uses SEED_OFFER scores before reseeding, showing individual
 replicas, range and median alongside the best retained pool score.
+Time-series plots use separate active-CV histories and each CV's reported cycles.
+Plot points retain their original snapshot index for chronological playback.
 All time-series plots support drag-to-select rectangle zoom, directional
 pan buttons and reset; zoom is retained per CV during playback. Offers
 are matched by CV and sampling event; legacy cycle indices are also accepted.
-Render GIF exports the full graph sequence using the current display settings,
+Selecting a specific CV filters playback, navigation, the timeline and GIF export.
+Follow active CV preserves the full chronological sequence.
+Render GIF exports the selected graph sequence using the current display settings,
 playback delay, and smooth-motion preference; rendering can be cancelled.
 """
 
@@ -244,6 +248,7 @@ TEMPLATE = r'''<!doctype html>
 @media(max-width:1050px){.display-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.playback-row{gap:12px}}
 @media(max-width:600px){.toolbar-panel{padding:14px}.display-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.playback-row{gap:12px 16px}#render-gif{margin-left:0}.timeline-row{flex-direction:column;align-items:stretch;gap:10px}.timeline-row #snapshot-label{justify-content:space-between}.tracking-row{flex-wrap:wrap;gap:10px}.viewer-controls{margin-top:18px}}
 
+.playback-sticky{position:sticky;top:8px;z-index:4;margin-top:0}.playback-sticky .toolbar-panel{box-shadow:0 4px 16px #0002}
 </style></head><body><main>
 <h1>SWARM pool development</h1><div class="muted">__TITLE__</div>
 <section class="viewer-controls" aria-label="Viewer controls">
@@ -258,6 +263,8 @@ TEMPLATE = r'''<!doctype html>
 <label class="display-field"><span>Edge width</span><select id="edges"><option value="uniform">Uniform</option><option value="weight">Endpoint weight</option></select></label>
 </div>
 </div>
+</section>
+<section class="viewer-controls playback-sticky" aria-label="Playback controls">
 <div class="toolbar-panel">
 <div class="toolbar-heading">Playback</div>
 <div class="playback-row">
@@ -281,24 +288,24 @@ TEMPLATE = r'''<!doctype html>
 <h2>Pool CV spread</h2>
 <div id="spread-summary" aria-live="polite"></div>
 <div class="legend"><span class="two">Shaded band: minimum–maximum</span><span class="one">━ Median</span><span>Virtual root excluded; gaps indicate unreported CV scores</span></div>
-<svg id="spread" role="img" aria-label="Retained pool CV range and median over snapshots"></svg>
+<svg id="spread" role="img" aria-label="Retained pool CV range and median over CV cycles"></svg>
 <h2>Replica CV spread</h2>
 <div id="replica-spread-summary" aria-live="polite"></div>
 <div class="legend"><span class="two">Shaded band: replica minimum–maximum</span><span class="one">━ Replica median</span><span style="color:#8b5cf6">┄ Best retained in pool</span></div>
-<svg id="replica-spread" role="img" aria-label="Replica CV scores, range and median compared with the pool frontier over snapshots"></svg>
-<h2>Best score over snapshots</h2><div class="legend"><span class="one">━ Recorded swarming best</span><span class="two">━ Best retained in pool</span></div>
-<svg id="trend" role="img" aria-label="Best scores over snapshots"></svg>
-<div class="muted" style="font-size:13px">Probabilities use the weights at the reported snapshot.</div>
+<svg id="replica-spread" role="img" aria-label="Replica CV scores, range and median compared with the pool frontier over CV cycles"></svg>
+<h2>Best score over CV cycles</h2><div class="legend"><span class="one">━ Recorded swarming best</span><span class="two">━ Best retained in pool</span></div>
+<svg id="trend" role="img" aria-label="Best scores over CV cycles"></svg>
+<div class="muted" style="font-size:13px">Plots show only the selected CV’s active cycles. Click a point to open its original snapshot. The vertical marker follows the latest available cycle during chronological playback. Probabilities use the reported weights.</div>
 <h2>Tracked-node draw probabilities</h2>
 <div class="muted">Colors match the tracking legend. Gaps mean a node is absent or its CV probability is unavailable.</div>
-<svg id="tracked-probability" role="img" aria-label="Tracked-node draw probabilities over snapshots"></svg>
+<svg id="tracked-probability" role="img" aria-label="Tracked-node draw probabilities over CV cycles"></svg>
 <h2>Frontier draw probability</h2>
 <div class="controls"><label>Frontier width <input id="frontier-width" type="number" required value="5" min="0" max="100" step="any" style="width:70px"> % of observed CV range</label></div>
 <div class="muted">Combined probability of nodes within this distance of the best retained score. The observed range is fixed per CV across the report.</div>
-<div id="frontier-summary"></div><svg id="frontier-probability" role="img" aria-label="Combined frontier draw probability over snapshots"></svg>
+<div id="frontier-summary"></div><svg id="frontier-probability" role="img" aria-label="Combined frontier draw probability over CV cycles"></svg>
 <h2>Pool topology over time</h2>
 <div class="legend"><span class="one">━ Real nodes</span><span class="two">━ Tips</span><span style="color:#8b5cf6">━ Branch points</span></div>
-<div id="topology-summary"></div><svg id="topology" role="img" aria-label="Pool size, tip count and branch-point count over snapshots"></svg>
+<div id="topology-summary"></div><svg id="topology" role="img" aria-label="Pool size, tip count and branch-point count over CV cycles"></svg>
 <details id="validation"><summary id="validation-title"></summary><ul id="warnings"></ul></details>
 </main><aside id="tracked-panel" hidden aria-label="Tracking legend"><strong>Tracked nodes</strong><div id="tracked-list" class="tracked-list"></div></aside><script id="pool-data" type="application/json">__DATA__</script><script>
 'use strict';
@@ -328,17 +335,20 @@ const pair=extrema[cv]||(extrema[cv]={min:Infinity,max:-Infinity,values:[]});
 pair.values.push(row.score);pair.min=Math.min(pair.min,row.score);pair.max=Math.max(pair.max,row.score);
 }}
 for(const cv of report.cvs){
+if(s.active && s.active!==cv)continue;
+if(!s.active && !extrema[cv])continue;
 const values=extrema[cv]?.values||[];values.sort((a,b)=>a-b);
 const count=values.length,middle=Math.floor(count/2),median=count?(count%2?values[middle]:values[middle-1]/2+values[middle]/2):null;
 const complete=real.length>0&&real.every(n=>n.cvs[cv]&&n.cvs[cv].weight!==null),total=complete?real.reduce((sum,n)=>sum+n.cvs[cv].weight,0):0;
 const probabilities=complete&&total>0?Object.fromEntries(real.map(n=>[n.id,n.cvs[cv].weight/total])):null;
 const batch=s.replicas?.[cv],replicas=Object.entries(batch?.scores||{}).map(([id,score])=>({id:Number(id),score})).sort((a,b)=>a.score-b.score||a.id-b.id);
 const rc=replicas.length,rm=Math.floor(rc/2);
-replicaHistories[cv].push({x:i+1,min:rc?replicas[0].score:null,max:rc?replicas[rc-1].score:null,median:rc?(rc%2?replicas[rm].score:replicas[rm-1].score/2+replicas[rm].score/2):null,count:rc,replicas,run:s.run??batch?.run,s,poolMin:extrema[cv]?.min??null,poolMax:extrema[cv]?.max??null});
-histories[cv].push({probabilities,x:i+1,min:extrema[cv]?.min??null,max:extrema[cv]?.max??null,median,count,record:s.record[cv]??null,s});
+replicaHistories[cv].push({index:i,x:s.cycle??i+1,min:rc?replicas[0].score:null,max:rc?replicas[rc-1].score:null,median:rc?(rc%2?replicas[rm].score:replicas[rm-1].score/2+replicas[rm].score/2):null,count:rc,replicas,run:s.run??batch?.run,s,poolMin:extrema[cv]?.min??null,poolMax:extrema[cv]?.max??null});
+histories[cv].push({probabilities,index:i,x:s.cycle??i+1,min:extrema[cv]?.min??null,max:extrema[cv]?.max??null,median,count,record:s.record[cv]??null,s});
 }
 }
-slider.max=data.length-1;slider.value=data.length-1;
+let snapshotIndex=data.length-1;
+const allSnapshotIndices=data.map((_,i)=>i);
 function option(value,label){const o=document.createElement('option');o.value=value;o.textContent=label;cvSelect.append(o)}
 if(report.cvs.length>1 && data.some(s=>s.active))option('__active__','Follow active CV');
 for(const cv of report.cvs)option(cv,cv);
@@ -350,7 +360,22 @@ const NS='http://www.w3.org/2000/svg';
 function el(tag,attrs={},text){const n=document.createElementNS(NS,tag);for(const [k,v] of Object.entries(attrs))n.setAttribute(k,v);if(text!==undefined)n.textContent=text;return n}
 function activeCv(s){return cvSelect.value==='__active__'?s.active:cvSelect.value}
 function stop(){if(timer)clearInterval(timer);timer=null;byId('play').textContent='Play'}
-function schedule(){if(timer)clearInterval(timer);timer=setInterval(()=>{if(+slider.value>=data.length-1){stop();return}slider.value=+slider.value+1;draw();if(+slider.value===data.length-1)stop()},Number(delayInput.value)*1000)}
+function playbackIndices(){return cvSelect.value==='__active__'?allSnapshotIndices:(histories[cvSelect.value]||[]).map(p=>p.index)}
+function alignPlayback(){
+const indices=playbackIndices();if(!indices.length)return;
+if(!indices.includes(snapshotIndex)){
+let preceding=indices[0];for(const index of indices){if(index>snapshotIndex)break;preceding=index}snapshotIndex=preceding;
+}
+}
+function movePlayback(delta){
+const indices=playbackIndices();if(!indices.length)return false;
+const position=indices.indexOf(snapshotIndex),next=position+delta;
+if(next<0||next>=indices.length)return false;
+snapshotIndex=indices[next];draw();return true;
+}
+function schedule(){if(timer)clearInterval(timer);timer=setInterval(()=>{
+if(!movePlayback(1)||snapshotIndex===playbackIndices().slice(-1)[0])stop();
+},Number(delayInput.value)*1000)}
 function selectNode(id){if(exportRunning)return;selected=id;if(trackedNodes.has(id))trackedNodes.delete(id);else{trackedNodes.add(id);if(!trackedColors.has(id))trackedColors.set(id,trackPalette[(trackedColors.size)%trackPalette.length])}draw()}
 byId('clear-tracked').addEventListener('click',()=>{if(exportRunning)return;trackedNodes.clear();selected=null;draw()});
 byId('graph-view').addEventListener('change',draw);
@@ -360,7 +385,7 @@ let exportRunning=false,exportAbort=false,exportStepping=false;
 const reducedMotion=window.matchMedia?window.matchMedia('(prefers-reduced-motion: reduce)'):null;
 const motionInput=byId('motion');
 function drawGraph(s,cv,total){
-const svg=byId('graph'),snapshot=+slider.value;
+const svg=byId('graph'),snapshot=snapshotIndex;
 const animate=graphSnapshot!==null&&motionInput.checked&&!(reducedMotion&&reducedMotion.matches)&&(snapshot!==graphSnapshot||graphFrame!==null);
 if(graphFrame!==null){cancelAnimationFrame(graphFrame);graphFrame=null}
 if(!svg.querySelector('[data-node-layer]')){
@@ -520,32 +545,50 @@ function plotLayer(svg,id,width,height,m){
 const defs=el('defs'),clip=el('clipPath',{id:id+'-clip'});clip.append(el('rect',{x:m.left,y:m.top,width:width-m.left-m.right,height:height-m.top-m.bottom}));defs.append(clip);svg.append(defs);
 const layer=el('g',{'clip-path':`url(#${id}-clip)`});svg.append(layer);return layer;
 }
+//Plot coordinates are CV cycles; index always refers to global playback.
+function cycleDomain(points){
+if(!points.length)return [1,2];
+let lo=Infinity,hi=-Infinity;for(const p of points){lo=Math.min(lo,p.x);hi=Math.max(hi,p.x)}
+return lo===hi?[lo-.5,hi+.5]:[lo,hi];
+}
+function drawCycleTicks(svg,x,domain,width,height,m){
+const count=width<450?3:6,ticks=[...new Set(Array.from({length:count},(_,i)=>Math.round(domain[0]+(domain[1]-domain[0])*i/(count-1))))].filter(v=>v>=domain[0]&&v<=domain[1]);
+for(const tick of ticks)svg.append(el('text',{x:x(tick),y:height-m.bottom+21,'text-anchor':'middle'},tick));
+svg.append(el('text',{x:(m.left+width-m.right)/2,y:height-8,'text-anchor':'middle'},'SWARM cycle (selected CV)'));
+}
+function updateCycleMarker(marker,points,x){
+let point=null;for(const p of points){if(p.index>snapshotIndex)break;point=p}
+marker.setAttribute('visibility',point?'visible':'hidden');
+if(point){marker.setAttribute('x1',x(point.x));marker.setAttribute('x2',x(point.x))}
+}
+function appendCycleMarker(layer,points,x,m,height){
+const marker=el('line',{'data-current-snapshot':'',y1:m.top,y2:height-m.bottom,stroke:'var(--fg)','stroke-opacity':.4});
+updateCycleMarker(marker,points,x);layer.append(marker);
+}
 function linePlot(id,series,key,label,percent=false,empty='No data available'){
 const svg=byId(id),width=Math.max(300,svg.clientWidth),height=265,m={left:66,right:24,top:22,bottom:52};
-const cv=id==='topology'?'__topology__':activeCv(data[+slider.value]),viewKey=JSON.stringify([id,cv]),view=spreadViews.get(viewKey),xDomain=view?.x||[1,Math.max(2,data.length)];
-const x=i=>m.left+(i+1-xDomain[0])/(xDomain[1]-xDomain[0])*(width-m.left-m.right),cacheKey=JSON.stringify([key,width,view]);
+const cv=activeCv(data[snapshotIndex]),points=histories[cv]||[],fullX=cycleDomain(points),viewKey=JSON.stringify([id,cv]),view=spreadViews.get(viewKey),xDomain=view?.x||fullX;
+const x=v=>m.left+(v-xDomain[0])/(xDomain[1]-xDomain[0])*(width-m.left-m.right),cacheKey=JSON.stringify([cv,key,width,view]);
 const current=svg.querySelector('[data-current-snapshot]');
-if(diagnosticCache.get(id)===cacheKey&&current){current.setAttribute('x1',x(+slider.value));current.setAttribute('x2',x(+slider.value));return}
+if(diagnosticCache.get(id)===cacheKey&&current){updateCycleMarker(current,points,x);return}
 diagnosticCache.set(id,cacheKey);spreadGeometry.delete(id);syncPlotControls(id);svg.replaceChildren();svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
 const values=series.flatMap(s=>s.values.filter(v=>v!==null));
 if(!values.length){svg.append(el('text',{x:width/2,y:80,'text-anchor':'middle'},empty));return}
 const fullY=[0,percent?100:Math.max(1,...values)*1.1],yDomain=view?.y||fullY,lo=yDomain[0],hi=yDomain[1],y=v=>height-m.bottom-(v-lo)/(hi-lo)*(height-m.top-m.bottom);
-spreadGeometry.set(id,{cv,viewKey,x:[...xDomain],y:[lo,hi],fullX:[1,Math.max(2,data.length)],fullY,width,height,m});syncPlotControls(id);
+spreadGeometry.set(id,{cv,viewKey,x:[...xDomain],y:[lo,hi],fullX,fullY,width,height,m});syncPlotControls(id);
 svg.append(el('rect',{x:m.left,y:m.top,width:width-m.left-m.right,height:height-m.top-m.bottom,fill:'none',stroke:'var(--line)'}));
 for(let i=0;i<5;i++){const v=lo+(hi-lo)*i/4,yy=y(v);svg.append(el('line',{x1:m.left,x2:width-m.right,y1:yy,y2:yy,stroke:'var(--line)','stroke-opacity':.35}));svg.append(el('text',{x:m.left-9,y:yy+4,'text-anchor':'end'},percent?fmt(v)+'%':fmt(v)))}
-const count=width<450?3:6,ticks=[...new Set(Array.from({length:count},(_,i)=>Math.round(xDomain[0]+(xDomain[1]-xDomain[0])*i/(count-1))-1))].filter(i=>i>=0&&i<data.length&&i+1>=xDomain[0]&&i+1<=xDomain[1]);
-for(const i of ticks)svg.append(el('text',{x:x(i),y:height-m.bottom+21,'text-anchor':'middle'},data[i].cycle??i+1));
-svg.append(el('text',{x:(m.left+width-m.right)/2,y:height-8,'text-anchor':'middle'},'Cycle (snapshots in log order)'));
+drawCycleTicks(svg,x,xDomain,width,height,m);
 svg.append(el('text',{transform:`translate(17,${(m.top+height-m.bottom)/2}) rotate(-90)`,'text-anchor':'middle'},label));
 const layer=plotLayer(svg,id,width,height,m);
-for(const s of series){let d='',previous=false;
-s.values.forEach((v,i)=>{if(v===null){previous=false;return}d+=(previous?'L':'M')+x(i)+','+y(v);previous=true});
+for(const s of series){let d='',previous=false,lastX=null;
+s.values.forEach((v,i)=>{if(v===null){previous=false;return}const px=points[i].x;d+=(previous&&px>lastX?'L':'M')+x(px)+','+y(v);previous=true;lastX=px});
 layer.append(el('path',{d,fill:'none',stroke:s.color,'stroke-width':2}));
-s.values.forEach((v,i)=>{if(v===null)return;const g=el('g',{role:'button',tabindex:0,'aria-label':`${s.name}, cycle ${data[i].cycle}, ${fmt(v)}${percent?' percent':''}`});
-g.append(el('circle',{cx:x(i),cy:y(v),r:9,fill:'transparent'}),el('circle',{cx:x(i),cy:y(v),r:3,fill:s.color}),el('title',{},`${s.name}; snapshot ${i+1}; cycle ${data[i].cycle}; ${fmt(v)}${percent?'%':''}`));
-const choose=()=>{if(exportRunning||performance.now()<spreadClickBlockedUntil)return;stop();slider.value=i;draw()};g.addEventListener('click',choose);g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose()}});layer.append(g);
+s.values.forEach((v,i)=>{if(v===null)return;const g=el('g',{role:'button',tabindex:0,'aria-label':`${s.name}, cycle ${points[i].s.cycle}, ${fmt(v)}${percent?' percent':''}`});
+g.append(el('circle',{cx:x(points[i].x),cy:y(v),r:9,fill:'transparent'}),el('circle',{cx:x(points[i].x),cy:y(v),r:3,fill:s.color}),el('title',{},`${s.name}; snapshot ${points[i].index+1}; cycle ${points[i].s.cycle}; TIGER2 run ${points[i].s.run??'unknown'}; ${fmt(v)}${percent?'%':''}`));
+const choose=()=>{if(exportRunning||performance.now()<spreadClickBlockedUntil)return;stop();snapshotIndex=points[i].index;draw()};g.addEventListener('click',choose);g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose()}});layer.append(g);
 });}
-layer.append(el('line',{'data-current-snapshot':'',x1:x(+slider.value),x2:x(+slider.value),y1:m.top,y2:height-m.bottom,stroke:'var(--fg)','stroke-opacity':.4}));
+appendCycleMarker(layer,points,x,m,height);
 }
 function drawDiagnostics(cv){
 const points=histories[cv]||[],ids=[...trackedNodes].filter(id=>id!==0).sort((a,b)=>a-b),colors=ids.map(trackColor);
@@ -553,39 +596,37 @@ linePlot('tracked-probability',ids.map(id=>({name:`Node ${id}`,color:trackColor(
 const fraction=frontierPercent/100,range=scoreRanges[cv],gap=range?fraction*(range.max-range.min):0;
 const frontier=points.map(p=>{if(!p.probabilities)return null;let probability=0;for(const n of p.s.nodes){if(!n.id)continue;const row=n.cvs[cv];if(!row)continue;const near=direction.value==='min'?row.score<=p.min+gap:row.score>=p.max-gap;if(near)probability+=p.probabilities[n.id]??0}return 100*probability});
 linePlot('frontier-probability',[{name:'Frontier',color:'var(--series)',values:frontier}],[cv,direction.value,fraction],'Draw probability',true);
-const value=frontier[+slider.value];byId('frontier-summary').textContent=`${cv||'Selected CV'} · Frontier width ${fmt(gap)} CV units · Current probability ${value===null||value===undefined?'unavailable':fmt(value)+'%'}`;
+const value=frontier[points.findIndex(p=>p.index===snapshotIndex)];byId('frontier-summary').textContent=`${cv||'Selected CV'} · Frontier width ${fmt(gap)} CV units · Current probability ${value===null||value===undefined?'unavailable':fmt(value)+'%'}`;
 linePlot('topology',[
-{name:'Pool nodes',color:'var(--series)',values:topologyHistory.map(p=>p.nodes)},
-{name:'Tips',color:'var(--other)',values:topologyHistory.map(p=>p.tips)},
-{name:'Branch points',color:'#8b5cf6',values:topologyHistory.map(p=>p.branches)}
+{name:'Pool nodes',color:'var(--series)',values:points.map(p=>topologyHistory[p.index].nodes)},
+{name:'Tips',color:'var(--other)',values:points.map(p=>topologyHistory[p.index].tips)},
+{name:'Branch points',color:'#8b5cf6',values:points.map(p=>topologyHistory[p.index].branches)}
 ],'topology','Node count');
-const t=topologyHistory[+slider.value];byId('topology-summary').textContent=`${t.nodes} real nodes · ${t.tips} tips · ${t.branches} branch points (virtual root excluded)`;
+const t=topologyHistory[snapshotIndex];byId('topology-summary').textContent=`${t.nodes} real nodes · ${t.tips} tips · ${t.branches} branch points (virtual root excluded)`;
 }
 byId('frontier-width').addEventListener('change',()=>{const input=byId('frontier-width');if(input.value.trim()&&input.checkValidity()){frontierPercent=Number(input.value);draw()}else input.reportValidity()});
 
 function drawSpread(cv,replicas=false){
-const plotId=replicas?'replica-spread':'spread',svg=byId(plotId),points=(replicas?replicaHistories:histories)[cv]||[],p=points[+slider.value];
+const plotId=replicas?'replica-spread':'spread',svg=byId(plotId),points=(replicas?replicaHistories:histories)[cv]||[],p=points.find(p=>p.index===snapshotIndex);
 byId(plotId+'-summary').textContent=p&&p.count?`${cv} · Minimum ${fmt(p.min)} · Maximum ${fmt(p.max)} · Range ${fmt(p.max-p.min)} · Median ${fmt(p.median)} · ${p.count} scored ${replicas?'replicas · Run '+(p.run??'unknown'):'nodes'}`:`${cv||'Selected CV'} · ${replicas?'No replica offers':'No retained scores'} reported in this snapshot`;
 const width=Math.max(300,svg.clientWidth),height=265,m={left:66,right:24,top:22,bottom:52};
 const viewKey=JSON.stringify([plotId,cv]),view=spreadViews.get(viewKey);
-const xDomain=view?.x||[1,Math.max(2,data.length)],x=v=>m.left+(v-xDomain[0])/(xDomain[1]-xDomain[0])*(width-m.left-m.right);
+const fullX=cycleDomain(points),xDomain=view?.x||fullX,x=v=>m.left+(v-xDomain[0])/(xDomain[1]-xDomain[0])*(width-m.left-m.right);
 byId(plotId).classList.add('zoom-plot');
 document.querySelector(`[data-reset-plot="${plotId}"]`).disabled=!view;
 const key=JSON.stringify([cv,width,replicas?direction.value:null,view]),current=svg.querySelector('[data-current-snapshot]');
-if(spreadCaches[plotId]===key&&current){current.setAttribute('x1',x(+slider.value+1));current.setAttribute('x2',x(+slider.value+1));return}
+if(spreadCaches[plotId]===key&&current){updateCycleMarker(current,points,x);return}
 spreadCaches[plotId]=key;spreadGeometry.delete(plotId);syncPlotControls(plotId);svg.replaceChildren();svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
 let lo=Infinity,hi=-Infinity;for(const p of points)if(p.count){lo=Math.min(lo,p.min);hi=Math.max(hi,p.max)}
 if(!Number.isFinite(lo)){svg.append(el('text',{x:width/2,y:80,'text-anchor':'middle'},replicas?'No replica offers available for this CV':'No retained scores available for this CV'));return}
 if(replicas)for(const p of points){const v=direction.value==='min'?p.poolMin:p.poolMax;if(v!==null){lo=Math.min(lo,v);hi=Math.max(hi,v)}}
 const pad=(hi-lo)*.1||Math.max(1,Math.abs(lo)*.05);lo-=pad;hi+=pad;
 const fullY=[lo,hi];if(view?.y){[lo,hi]=view.y}
-spreadGeometry.set(plotId,{cv,viewKey,x:[...xDomain],y:[lo,hi],fullX:[1,Math.max(2,data.length)],fullY,width,height,m});syncPlotControls(plotId);
+spreadGeometry.set(plotId,{cv,viewKey,x:[...xDomain],y:[lo,hi],fullX,fullY,width,height,m});syncPlotControls(plotId);
 const y=v=>height-m.bottom-(v-lo)/(hi-lo)*(height-m.top-m.bottom);
 svg.append(el('rect',{x:m.left,y:m.top,width:width-m.left-m.right,height:height-m.top-m.bottom,fill:'none',stroke:'var(--line)'}));
 for(let i=0;i<5;i++){const v=lo+(hi-lo)*i/4,yy=y(v);svg.append(el('line',{x1:m.left,x2:width-m.right,y1:yy,y2:yy,stroke:'var(--line)','stroke-opacity':.35}));svg.append(el('text',{x:m.left-9,y:yy+4,'text-anchor':'end'},fmt(v)))}
-const count=width<450?3:6,ticks=[...new Set(Array.from({length:count},(_,i)=>Math.round(xDomain[0]+(xDomain[1]-xDomain[0])*i/(count-1))))].filter(v=>v>=1&&v<=data.length&&v>=xDomain[0]&&v<=xDomain[1]);
-for(const tick of ticks)svg.append(el('text',{x:x(tick),y:height-m.bottom+21,'text-anchor':'middle'},data[tick-1].cycle??tick));
-svg.append(el('text',{x:(m.left+width-m.right)/2,y:height-8,'text-anchor':'middle'},'Cycle (snapshots in log order)'));
+drawCycleTicks(svg,x,xDomain,width,height,m);
 svg.append(el('text',{transform:`translate(17,${(m.top+height-m.bottom)/2}) rotate(-90)`,'text-anchor':'middle'},'CV score'));
 const defs=el('defs'),clip=el('clipPath',{id:plotId+'-clip'});clip.append(el('rect',{x:m.left,y:m.top,width:width-m.left-m.right,height:height-m.top-m.bottom}));defs.append(clip);svg.append(defs);
 const layer=el('g',{'clip-path':`url(#${plotId}-clip)`});svg.append(layer);
@@ -596,17 +637,17 @@ const upper=segment.map(p=>`${x(p.x)},${y(p.max)}`),lower=segment.slice().revers
 layer.append(el('path',{d:'M'+upper.join('L')+'L'+lower.join('L')+'Z',fill:'var(--other)','fill-opacity':.18,stroke:'none'}));
 for(const field of ['min','max','median'])layer.append(el('path',{d:'M'+segment.map(p=>`${x(p.x)},${y(p[field])}`).join('L'),fill:'none',stroke:field==='median'?'var(--series)':'var(--other)','stroke-width':field==='median'?2:1}));segment=[];
 }
-for(const p of points){if(p.count)segment.push(p);else flush()}flush();
-if(replicas){let d='',previous=false;for(const p of points){const v=direction.value==='min'?p.poolMin:p.poolMax;if(v===null){previous=false;continue}d+=(previous?'L':'M')+x(p.x)+','+y(v);previous=true}layer.append(el('path',{d,fill:'none',stroke:'#8b5cf6','stroke-width':2,'stroke-dasharray':'5 4'}))}
+for(const p of points){if(segment.length&&p.x<=segment[segment.length-1].x)flush();if(p.count)segment.push(p);else flush()}flush();
+if(replicas){let d='',previous=false,lastX=null;for(const p of points){const v=direction.value==='min'?p.poolMin:p.poolMax;if(v===null){previous=false;continue}d+=(previous&&p.x>lastX?'L':'M')+x(p.x)+','+y(v);previous=true;lastX=p.x}layer.append(el('path',{d,fill:'none',stroke:'#8b5cf6','stroke-width':2,'stroke-dasharray':'5 4'}))}
 for(const p of points)if(p.count){
 const g=el('g',{role:'button',tabindex:0,'aria-label':`Cycle ${p.s.cycle}, minimum ${p.min}, maximum ${p.max}, median ${p.median}`});
 g.append(el('line',{x1:x(p.x),x2:x(p.x),y1:y(p.min),y2:y(p.max),stroke:'var(--other)','stroke-width':2}));
 g.append(el('circle',{cx:x(p.x),cy:y(p.median),r:10,fill:'transparent'}));g.append(el('circle',{cx:x(p.x),cy:y(p.median),r:3,fill:'var(--series)'}));
 if(replicas)for(const r of p.replicas){const dot=el('circle',{cx:x(p.x),cy:y(r.score),r:3,fill:'var(--other)','fill-opacity':.65,'data-replica-id':r.id});dot.append(el('title',{},`Replica ${r.id}; run ${p.run}; ${cv}: ${fmt(r.score)}`));g.append(dot)}
-g.append(el('title',{},`Snapshot ${p.x}; cycle ${p.s.cycle}; ${cv}: minimum ${fmt(p.min)}, maximum ${fmt(p.max)}, median ${fmt(p.median)}; ${p.count} ${replicas?'replicas':'nodes'}`));
-const choose=()=>{if(exportRunning||performance.now()<spreadClickBlockedUntil)return;stop();slider.value=p.x-1;draw()};g.addEventListener('click',choose);g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose()}});layer.append(g);
+g.append(el('title',{},`Snapshot ${p.index+1}; cycle ${p.s.cycle}; TIGER2 run ${p.s.run??'unknown'}; ${cv}: minimum ${fmt(p.min)}, maximum ${fmt(p.max)}, median ${fmt(p.median)}; ${p.count} ${replicas?'replicas':'nodes'}`));
+const choose=()=>{if(exportRunning||performance.now()<spreadClickBlockedUntil)return;stop();snapshotIndex=p.index;draw()};g.addEventListener('click',choose);g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose()}});layer.append(g);
 }
-layer.append(el('line',{'data-current-snapshot':'',x1:x(+slider.value+1),x2:x(+slider.value+1),y1:m.top,y2:height-m.bottom,stroke:'var(--fg)','stroke-opacity':.4}));
+appendCycleMarker(layer,points,x,m,height);
 }
 
 //Zoom in data coordinates so labels, line widths and replica dots remain legible.
@@ -615,7 +656,7 @@ const range=full[1]-full[0],span=Math.min(range,Math.max(range/1000,domain[1]-do
 const low=Math.max(full[0],Math.min(full[1]-span,domain[0]));return [low,low+span];
 }
 function redrawPlot(id,cv){
-if(id==='spread'||id==='replica-spread')drawSpread(cv,id==='replica-spread');else if(id==='trend')drawTrend(cv);else drawDiagnostics(activeCv(data[+slider.value]));
+if(id==='spread'||id==='replica-spread')drawSpread(cv,id==='replica-spread');else if(id==='trend')drawTrend(cv);else drawDiagnostics(activeCv(data[snapshotIndex]));
 }
 function updateSpreadView(id,x,y){
 const g=spreadGeometry.get(id);if(!g)return;
@@ -670,32 +711,33 @@ document.querySelectorAll('[data-reset-plot]').forEach(button=>button.addEventLi
 
 function drawTrend(cv){
 const svg=byId('trend'),width=Math.max(300,svg.clientWidth),height=265,m={left:66,right:24,top:22,bottom:52};
-const viewKey=JSON.stringify(['trend',cv]),view=spreadViews.get(viewKey),xDomain=view?.x||[1,Math.max(2,data.length)];
+const points=(histories[cv]||[]).map(p=>({...p,pool:direction.value==='min'?p.min:p.max}));
+const fullX=cycleDomain(points),viewKey=JSON.stringify(['trend',cv]),view=spreadViews.get(viewKey),xDomain=view?.x||fullX;
 const x=v=>m.left+(v-xDomain[0])/(xDomain[1]-xDomain[0])*(width-m.left-m.right);
 const key=JSON.stringify([cv,direction.value,width,view]),current=svg.querySelector('[data-current-snapshot]');
-if(trendCacheKey===key&&current){current.setAttribute('x1',x(+slider.value+1));current.setAttribute('x2',x(+slider.value+1));return}
+if(trendCacheKey===key&&current){updateCycleMarker(current,points,x);return}
 trendCacheKey=key;spreadGeometry.delete('trend');syncPlotControls('trend');svg.replaceChildren();svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
-const points=(histories[cv]||[]).map(p=>({...p,pool:direction.value==='min'?p.min:p.max}));
+
 let lo=Infinity,hi=-Infinity;for(const p of points)for(const v of [p.pool,p.record])if(v!==null){lo=Math.min(lo,v);hi=Math.max(hi,v)}
 if(!Number.isFinite(lo)){svg.append(el('text',{x:width/2,y:80,'text-anchor':'middle'},'No scores available for this CV'));return}
 const pad=(hi-lo)*.1||Math.max(1,Math.abs(lo)*.05);lo-=pad;hi+=pad;
 const fullY=[lo,hi];if(view?.y){[lo,hi]=view.y}
-spreadGeometry.set('trend',{cv,viewKey,x:[...xDomain],y:[lo,hi],fullX:[1,Math.max(2,data.length)],fullY,width,height,m});syncPlotControls('trend');
+spreadGeometry.set('trend',{cv,viewKey,x:[...xDomain],y:[lo,hi],fullX,fullY,width,height,m});syncPlotControls('trend');
 const y=v=>height-m.bottom-(v-lo)/(hi-lo)*(height-m.top-m.bottom);
 svg.append(el('rect',{x:m.left,y:m.top,width:width-m.left-m.right,height:height-m.top-m.bottom,fill:'none',stroke:'var(--line)'}));
 for(let i=0;i<5;i++){const v=lo+(hi-lo)*i/4,yy=y(v);svg.append(el('line',{x1:m.left,x2:width-m.right,y1:yy,y2:yy,stroke:'var(--line)','stroke-opacity':.35}));svg.append(el('text',{x:m.left-9,y:yy+4,'text-anchor':'end'},fmt(v)));}
-const count=width<450?3:6;const ticks=[...new Set(Array.from({length:count},(_,i)=>Math.round(xDomain[0]+(xDomain[1]-xDomain[0])*i/(count-1))))].filter(v=>v>=1&&v<=data.length&&v>=xDomain[0]&&v<=xDomain[1]);for(const tick of ticks)svg.append(el('text',{x:x(tick),y:height-m.bottom+21,'text-anchor':'middle'},tick));
-svg.append(el('text',{x:(m.left+width-m.right)/2,y:height-8,'text-anchor':'middle'},'Snapshot in log order'));
+drawCycleTicks(svg,x,xDomain,width,height,m);
 svg.append(el('text',{transform:`translate(17,${(m.top+height-m.bottom)/2}) rotate(-90)`,'text-anchor':'middle'},`CV score`));
 const layer=plotLayer(svg,'trend',width,height,m);
-for(const [key,color] of [['record','var(--series)'],['pool','var(--other)']]){let d='',prev=null;for(const p of points){if(p[key]===null){prev=null;continue}d+=prev?`H${x(p.x)}V${y(p[key])}`:`M${x(p.x)},${y(p[key])}`;prev=p;}layer.append(el('path',{d,fill:'none',stroke:color,'stroke-width':2}));
-for(const p of points)if(p[key]!==null){const g=el('g',{role:'button',tabindex:0,'aria-label':`Snapshot ${p.x}, ${key} score ${p[key]}`});g.append(el('circle',{cx:x(p.x),cy:y(p[key]),r:10,fill:'transparent'}));g.append(el('circle',{cx:x(p.x),cy:y(p[key]),r:3,fill:color}));g.append(el('title',{},`Snapshot ${p.x}; cycle ${p.s.cycle}; ${key==='record'?'recorded best':'pool best'} ${p[key]}`));const choose=()=>{if(exportRunning||performance.now()<spreadClickBlockedUntil)return;stop();slider.value=p.x-1;draw()};g.addEventListener('click',choose);g.addEventListener('keydown',e=>{if(e.key==='Enter'){choose()}});layer.append(g);}}
-layer.append(el('line',{'data-current-snapshot':'',x1:x(+slider.value+1),x2:x(+slider.value+1),y1:m.top,y2:height-m.bottom,stroke:'var(--fg)','stroke-opacity':.4}));
+for(const [key,color] of [['record','var(--series)'],['pool','var(--other)']]){let d='',prev=null;for(const p of points){if(p[key]===null){prev=null;continue}d+=prev&&p.x>prev.x?`H${x(p.x)}V${y(p[key])}`:`M${x(p.x)},${y(p[key])}`;prev=p;}layer.append(el('path',{d,fill:'none',stroke:color,'stroke-width':2}));
+for(const p of points)if(p[key]!==null){const g=el('g',{role:'button',tabindex:0,'aria-label':`Snapshot ${p.index+1}, ${key} score ${p[key]}`});g.append(el('circle',{cx:x(p.x),cy:y(p[key]),r:10,fill:'transparent'}));g.append(el('circle',{cx:x(p.x),cy:y(p[key]),r:3,fill:color}));g.append(el('title',{},`Snapshot ${p.index+1}; cycle ${p.s.cycle}; TIGER2 run ${p.s.run??'unknown'}; ${key==='record'?'recorded best':'pool best'} ${p[key]}`));const choose=()=>{if(exportRunning||performance.now()<spreadClickBlockedUntil)return;stop();snapshotIndex=p.index;draw()};g.addEventListener('click',choose);g.addEventListener('keydown',e=>{if(e.key==='Enter'){choose()}});layer.append(g);}}
+appendCycleMarker(layer,points,x,m,height);
 }
-function draw(){if(exportRunning&&!exportStepping)return;const i=+slider.value,s=data[i],cv=activeCv(s);if(cv!==lastCv){direction.value=cvDirections[cv]||'min';lastCv=cv}
+function draw(){if(exportRunning&&!exportStepping)return;alignPlayback();const i=snapshotIndex,s=data[i],cv=activeCv(s);if(cv!==lastCv){direction.value=cvDirections[cv]||'min';lastCv=cv}
 byId('color-legend').textContent=colorSelect.value==='id'?'Color identifies node ID; neighboring IDs use contrasting hues':'Darker fill = better score on a fixed scale per CV';
 byId('edge-legend').textContent=edgeSelect.value==='weight'?'Thicker edges = both endpoints more strongly weighted (compressed scale); root edges uniform':'Edges have uniform width';
-byId('position').textContent=`${i+1} / ${data.length}`;byId('prev').disabled=i===0;byId('next').disabled=i===data.length-1;
+const sequence=playbackIndices(),position=sequence.indexOf(i);slider.max=Math.max(0,sequence.length-1);slider.value=Math.max(0,position);
+byId('position').textContent=`${position+1} / ${sequence.length}`;byId('prev').disabled=position<=0;byId('next').disabled=position>=sequence.length-1;byId('play').disabled=sequence.length<2;
 byId('status').textContent=`${s.source?s.source+' · ':''}Cycle ${s.cycle} · TIGER2 run ${s.run??'unknown'} · CV ${cv||'unknown'} · Active CV ${s.active||'unknown'} · ${s.nodes.filter(n=>n.id).length} real nodes`;
 let total=0,complete=true;for(const n of s.nodes){if(!n.id)continue;const row=n.cvs[cv];if(!row||row.weight===null){complete=false;continue}total+=row.weight}
 if(!complete)total=null;
@@ -714,8 +756,15 @@ for(const control of trackedList.querySelectorAll('input,button'))control.disabl
 byId('clear-tracked').disabled=exportRunning||!trackedNodes.size;
 drawGraph(s,cv,total);drawSpread(cv);drawSpread(cv,true);drawTrend(cv);drawDiagnostics(cv);
 }
-byId('prev').addEventListener('click',()=>{stop();slider.value=Math.max(0,+slider.value-1);draw()});byId('next').addEventListener('click',()=>{stop();slider.value=Math.min(data.length-1,+slider.value+1);draw()});slider.addEventListener('input',()=>{stop();draw()});
-byId('play').addEventListener('click',()=>{if(timer){stop();return}if(!delayInput.checkValidity()){delayInput.reportValidity();return}if(+slider.value===data.length-1){slider.value=0;draw()}byId('play').textContent='Pause';schedule()});
+byId('prev').addEventListener('click',()=>{stop();movePlayback(-1)});
+byId('next').addEventListener('click',()=>{stop();movePlayback(1)});
+slider.addEventListener('input',()=>{stop();const indices=playbackIndices();snapshotIndex=indices[Number(slider.value)]??snapshotIndex;draw()});
+byId('play').addEventListener('click',()=>{
+if(timer){stop();return}if(!delayInput.checkValidity()){delayInput.reportValidity();return}
+const indices=playbackIndices();if(indices.length<2)return;
+if(snapshotIndex===indices[indices.length-1]){snapshotIndex=indices[0];draw()}
+byId('play').textContent='Pause';schedule();
+});
 function adjustDelay(change){
 const value=Number(delayInput.value),base=delayInput.value.trim()&&Number.isFinite(value)?value:report.delay??0.9;
 delayInput.value=String(Math.round(Math.max(0.05,Math.min(60,base+change))*1000000)/1000000);
@@ -725,7 +774,7 @@ byId('delay-down').addEventListener('click',()=>adjustDelay(-0.05));
 byId('delay-up').addEventListener('click',()=>adjustDelay(0.05));
 delayInput.addEventListener('input',()=>{if(delayInput.checkValidity()&&timer)schedule()});
 delayInput.addEventListener('change',()=>{if(!delayInput.checkValidity()){stop();delayInput.reportValidity()}});
-cvSelect.addEventListener('change',draw);direction.addEventListener('change',()=>{const cv=activeCv(data[+slider.value]);if(cv)cvDirections[cv]=direction.value;draw()});sizeSelect.addEventListener('change',draw);
+cvSelect.addEventListener('change',()=>{stop();alignPlayback();draw()});direction.addEventListener('change',()=>{const cv=activeCv(data[snapshotIndex]);if(cv)cvDirections[cv]=direction.value;draw()});sizeSelect.addEventListener('change',draw);
 motionInput.addEventListener('change',draw);
 if(reducedMotion&&reducedMotion.addEventListener)reducedMotion.addEventListener('change',draw);
 edgeSelect.addEventListener('change',draw);colorSelect.addEventListener('change',draw);
@@ -801,8 +850,8 @@ const image=await new Promise((resolve,reject)=>{const img=new Image();img.onloa
 context.fillStyle=getComputedStyle(document.body).backgroundColor;context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(image,0,bounds.legendHeight,canvas.width,bounds.pixelsHigh);
 if(trackedNodes.size){
 const ids=[...trackedNodes].sort((a,b)=>a-b),font=12,pad=8,line=19,legendWidth=Math.min(190,canvas.width-16),legendHeight=pad*2+line*(ids.length+1),left=canvas.width-legendWidth-8,top=8;
-context.save();context.globalAlpha=.94;context.fillStyle=getComputedStyle(byId('graph-wrap')).backgroundColor;context.fillRect(left,top,legendWidth,legendHeight);context.globalAlpha=1;context.strokeStyle='#94a3b8';context.lineWidth=1;context.strokeRect(left,top,legendWidth,legendHeight);context.fillStyle=getComputedStyle(document.body).color;context.font=`bold ${font}px sans-serif`;context.fillText('Tracked nodes',left+pad,top+pad+font);if(left>180)context.fillText(`Cycle ${data[+slider.value].cycle} · CV ${activeCv(data[+slider.value])||'unknown'}`,8,top+pad+font);context.font=`${font}px sans-serif`;
-const snapshot=data[+slider.value];ids.forEach((id,i)=>{const y=top+pad+line*(i+1)+font;context.fillStyle=trackColor(id);context.fillRect(left+pad,y-9,10,10);context.fillStyle=getComputedStyle(document.body).color;context.fillText(`Node ${id}${snapshot.nodes.some(n=>n.id===id)?'':' (absent)'}`,left+pad+17,y)});context.restore();
+context.save();context.globalAlpha=.94;context.fillStyle=getComputedStyle(byId('graph-wrap')).backgroundColor;context.fillRect(left,top,legendWidth,legendHeight);context.globalAlpha=1;context.strokeStyle='#94a3b8';context.lineWidth=1;context.strokeRect(left,top,legendWidth,legendHeight);context.fillStyle=getComputedStyle(document.body).color;context.font=`bold ${font}px sans-serif`;context.fillText('Tracked nodes',left+pad,top+pad+font);if(left>180)context.fillText(`Cycle ${data[snapshotIndex].cycle} · CV ${activeCv(data[snapshotIndex])||'unknown'}`,8,top+pad+font);context.font=`${font}px sans-serif`;
+const snapshot=data[snapshotIndex];ids.forEach((id,i)=>{const y=top+pad+line*(i+1)+font;context.fillStyle=trackColor(id);context.fillRect(left+pad,y-9,10,10);context.fillStyle=getComputedStyle(document.body).color;context.fillText(`Node ${id}${snapshot.nodes.some(n=>n.id===id)?'':' (absent)'}`,left+pad+17,y)});context.restore();
 }
 return context.getImageData(0,0,canvas.width,canvas.height).data;
 }finally{URL.revokeObjectURL(url)}
@@ -811,21 +860,21 @@ async function renderGif(){
 if(exportRunning){exportAbort=true;byId('export-status').textContent='Cancelling GIF rendering…';return}
 if(!delayInput.checkValidity()){delayInput.reportValidity();return}
 stop();if(graphFrame!==null){cancelAnimationFrame(graphFrame);graphFrame=null}if(graphTransition)graphTransition.finish();
-const savedSnapshot=slider.value,savedMotion=motionInput.checked,controls=[...document.querySelectorAll('main button, main input, main select, #tracked-panel button, #tracked-panel input')].filter(n=>n.id!=='render-gif'),disabled=controls.map(n=>n.disabled);
+const frameIndices=playbackIndices(),savedSnapshot=snapshotIndex,savedMotion=motionInput.checked,controls=[...document.querySelectorAll('main button, main input, main select, #tracked-panel button, #tracked-panel input')].filter(n=>n.id!=='render-gif'),disabled=controls.map(n=>n.disabled);
 const button=byId('render-gif'),status=byId('export-status');
 exportRunning=true;exportAbort=false;controls.forEach(n=>n.disabled=true);button.textContent='Cancel render';
 const delay=Math.max(1,Math.round(Number(delayInput.value)*100));let frames=0;
-function step(index){slider.value=index;exportStepping=true;try{draw()}finally{exportStepping=false}}
+function step(index){snapshotIndex=index;exportStepping=true;try{draw()}finally{exportStepping=false}}
 try{
 const bounds=gifBounds(),canvas=document.createElement('canvas');bounds.legendHeight=trackedNodes.size?32+19*(trackedNodes.size+1):0;canvas.width=bounds.pixelsWide;canvas.height=bounds.pixelsHigh+bounds.legendHeight;
 const context=canvas.getContext('2d',{willReadFrequently:true}),encoder=gifEncoder(canvas.width,canvas.height);
 async function capture(hold){if(exportAbort)return;const pixels=await gifPixels(canvas,context,bounds);if(exportAbort)return;encoder.add(pixels,hold);frames++}
 if(!context)throw new Error('Canvas rendering is unavailable in this browser.');
 if(document.fonts&&document.fonts.ready)await document.fonts.ready;
-for(let i=0;i<data.length&&!exportAbort;i++){
-status.textContent=`Rendering GIF: snapshot ${i+1} / ${data.length} · ${frames} frames`;
+for(let i=0;i<frameIndices.length&&!exportAbort;i++){
+status.textContent=`Rendering GIF: snapshot ${i+1} / ${frameIndices.length} · ${frames} frames`;
 //The first snapshot appears immediately, with no transition from the viewer.
-motionInput.checked=i===0?false:savedMotion;step(i);
+motionInput.checked=i===0?false:savedMotion;step(frameIndices[i]);
 const transition=graphTransition;
 const smooth=i>0&&savedMotion&&!(reducedMotion&&reducedMotion.matches);
 if(smooth){
@@ -845,7 +894,7 @@ status.textContent=`GIF ready · ${frames} frames · ${canvas.width} × ${canvas
 }catch(error){status.textContent='GIF rendering failed: '+error.message}
 finally{
 if(graphFrame!==null){cancelAnimationFrame(graphFrame);graphFrame=null}
-exportRunning=false;exportStepping=false;motionInput.checked=savedMotion;slider.value=savedSnapshot;
+exportRunning=false;exportStepping=false;motionInput.checked=savedMotion;snapshotIndex=savedSnapshot;
 graphSnapshot=null;controls.forEach((n,i)=>n.disabled=disabled[i]);button.textContent='Render GIF';draw();
 }
 }
