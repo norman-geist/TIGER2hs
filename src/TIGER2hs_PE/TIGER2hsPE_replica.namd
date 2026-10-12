@@ -1790,24 +1790,20 @@ while {$i_run < $num_runs} {
                         puts "Info: SWARM - $seed_caption - POOL NODE $removed_id DROPPED - REPLACEMENT $replacement"
                     }
 
-                    #Report on the graph
+                    #Report pool state for the currently active CV
                     puts stderr [format "%-12s %8s %10s %10s %20s %12s %12s %12s %14s" "SWARM_POOL" "Cycle" "Node" "Parent" "CV" "Score" "Attempts" "Successes" "Weight"]
                     foreach node_id $swarm_pool(nodes) {
-                        foreach iterate_seed_cv [array names swarm_colvars] {
-                            set attempted  $swarm_pool($node_id.seed_attempted_$iterate_seed_cv)
-                            set successful $swarm_pool($node_id.seed_successful_$iterate_seed_cv)
+                        set attempted  $swarm_pool($node_id.seed_attempted_$seed_cv)
+                        set successful $swarm_pool($node_id.seed_successful_$seed_cv)
 
-                            set weight 0.0
-                            if {$node_id != 0} {
-                                set weight [expr { ($successful + 1.0) / pow($attempted + 1.0, $swarmpooldecay) }]
-                            }
-
-                            puts stderr [format "%-12s %8d %10d %10d %20s %12.6g %12.6g %12.6g %14.8g" \
-                                "SWARM_POOL" $swarm(seed_accepted_${seed_cv}) $node_id \
-                                $swarm_pool($node_id.parent) $iterate_seed_cv \
-                                $swarm_pool($node_id.score_$iterate_seed_cv) \
-                                $attempted $successful $weight]
+                        set weight 0.0
+                        if {$node_id != 0} {
+                            set weight [expr {
+                                ($successful + 1.0) / pow($attempted + 1.0, $swarmpooldecay)
+                            }]
                         }
+
+                        puts stderr [format "%-12s %8d %10d %10d %20s %12.6g %12.6g %12.6g %14.8g" "SWARM_POOL" $swarm(seed_accepted_${seed_cv}) $node_id $swarm_pool($node_id.parent) $seed_cv $swarm_pool($node_id.score_$seed_cv) $attempted $successful $weight]
                     }
                                         
                     #Seed randomly selected replicas with randomly selected but weighted pool structure
