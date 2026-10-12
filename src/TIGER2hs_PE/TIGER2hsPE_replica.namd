@@ -851,6 +851,16 @@ proc swarm_weight_max {val1 val2} {
     return [expr 1. * $val1 / $val2]
 }
 
+#Transfer weights between nodes
+proc swarm_pool_share {pool_data origin_node new_node seed_cv fraction reward} {
+    array set pool $pool_data
+
+    set pool($origin_node.seed_successful_$seed_cv) [expr { $pool($origin_node.seed_successful_$seed_cv) + (1.0 - $fraction) * $reward }]
+    set pool($new_node.seed_successful_$seed_cv)    [expr { $pool($new_node.seed_successful_$seed_cv)    +        $fraction  * $reward }]
+
+    return [array get pool]
+}
+
 #Limit helper functions
 proc swarm_limit_min {val lim} {
     return [expr $val <= $lim]
@@ -872,9 +882,7 @@ proc swarm_pool_pick {pool_data seed_cv decay} {
         set attempted  $pool($id.seed_attempted_$seed_cv)
         set successful $pool($id.seed_successful_$seed_cv)
 
-        set weight [expr {
-            pow(($successful + 1.0) / ($attempted + 1.0), $decay)
-        }]
+        set weight [expr { ($successful + 1.0) / pow($attempted + 1.0, $decay) }]
 
         lappend ids $id
         lappend weights $weight
@@ -899,153 +907,120 @@ proc swarm_pool_pick {pool_data seed_cv decay} {
 proc swarm_pool_drop {pool_data seed_cv cv_names decay} {
     array set pool $pool_data
 
-    #Build child lists
+    #Collect physical nodes
     set ids {}
     foreach id $pool(nodes) {
-        set children($id) {}
-        if {$id != 0} {lappend ids $id}
+        if {$id == 0} {continue}
+        lappend ids $id
+        set protected($id) 0
     }
+
     if {![llength $ids]} {
         return [list [array get pool] -1 -1]
     }
 
-    foreach id $ids {
-        lappend children($pool($id.parent)) $id
-        set protected($id) 0
-    }
-
-    #Preserve unique endpoints of every CV, excluding the virtual root
+    #Protect one representative of both endpoints for every CV
     foreach cv $cv_names {
-        set first [lindex $ids 0]
-        set minimum $pool($first.score_$cv)
+        set min_id [lindex $ids 0]
+        set max_id $min_id
+        set minimum $pool($min_id.score_$cv)
         set maximum $minimum
-        set min_count 0
-        set max_count 0
 
         foreach id $ids {
             set score $pool($id.score_$cv)
 
             if {$score < $minimum} {
                 set minimum $score
-                set min_count 1
-            } elseif {$score == $minimum} {
-                incr min_count
+                set min_id $id
             }
 
             if {$score > $maximum} {
                 set maximum $score
-                set max_count 1
-            } elseif {$score == $maximum} {
-                incr max_count
+                set max_id $id
             }
         }
 
-        foreach id $ids {
-            set score $pool($id.score_$cv)
-
-            if {($min_count == 1 && $score == $minimum) ||
-                ($max_count == 1 && $score == $maximum)} {
-                set protected($id) 1
-            }
-        }
+        set protected($min_id) 1
+        set protected($max_id) 1
     }
 
-    #Find cheapest intermediate node
-    set selected -1
-    set lowest_cost Inf
-
+    #Sort physical nodes by their active CV score
+    set ordered {}
     foreach id $ids {
+        lappend ordered [list $pool($id.score_$seed_cv) $id]
+    }
+    set ordered [lsort -real -index 0 $ordered]
+
+    #Find the least costly removal, independent of graph topology
+    set selected -1
+    set replacement -1
+    set lowest_cost Inf
+    set lowest_weight Inf
+    set count [llength $ordered]
+
+    for {set i 0} {$i < $count} {incr i} {
+        lassign [lindex $ordered $i] score id
+
         if {$protected($id)} {continue}
 
-        set parent $pool($id.parent)
-        if {$parent == 0 || [llength $children($id)] != 1} {
+        set lower -1
+        set upper -1
+        set left Inf
+        set right Inf
+
+        if {$i > 0} {
+            lassign [lindex $ordered [expr {$i - 1}]] lower_score lower
+            set left [expr {abs($score - $lower_score)}]
+        }
+
+        if {$i < $count - 1} {
+            lassign [lindex $ordered [expr {$i + 1}]] upper_score upper
+            set right [expr {abs($upper_score - $score)}]
+        }
+
+        if {$lower != -1 && $upper != -1} {
+            set cost [expr {2.0 * $left * $right}]
+            set candidate_replacement [expr {$left <= $right ? $lower : $upper}]
+        } elseif {$lower != -1} {
+            #An unprotected boundary node duplicates a protected endpoint
+            set cost [expr {$left * $left}]
+            set candidate_replacement $lower
+        } elseif {$upper != -1} {
+            set cost [expr {$right * $right}]
+            set candidate_replacement $upper
+        } else {
             continue
         }
 
-        set child [lindex $children($id) 0]
-        set left [expr {
-            $pool($id.score_$seed_cv) - $pool($parent.score_$seed_cv)
-        }]
-        set right [expr {
-            $pool($child.score_$seed_cv) - $pool($id.score_$seed_cv)
+        set attempted $pool($id.seed_attempted_$seed_cv)
+        set successful $pool($id.seed_successful_$seed_cv)
+        set weight [expr {
+            ($successful + 1.0) / pow($attempted + 1.0, $decay)
         }]
 
-        #Preserve turning points in the active CV
-        #Direction reversal due to rotating CVs
-        if {$left * $right < 0.0} {continue}
-
-        set cost [expr {2.0 * abs($left) * abs($right)}]
-        if {$cost < $lowest_cost} {
+        #Preserve coverage first; prefer lower weight when costs are equal
+        if {$selected == -1 || $cost < $lowest_cost || ($cost == $lowest_cost && $weight < $lowest_weight)} {
             set selected $id
+            set replacement $candidate_replacement
             set lowest_cost $cost
-
-            set gap [expr {abs($left) + abs($right)}]
-            set fraction [expr { $gap > 0.0 ? abs($right) / $gap : 0.5 }]
-            set recipients [list $parent $child]
-            set fractions [list $fraction [expr {1.0 - $fraction}]]
+            set lowest_weight $weight
         }
     }
 
-    #Otherwise prune an eligible tip: inverse of its reseeding weight
+    #All surviving physical nodes are protected
     if {$selected == -1} {
-        set lowest_key Inf
-
-        foreach id $ids {
-            if {$protected($id) || [llength $children($id)]} {
-                continue
-            }
-
-            set attempted  $pool($id.seed_attempted_$seed_cv)
-            set successful $pool($id.seed_successful_$seed_cv)
-
-            #Weighted random race, calculated in log space
-            set u [expr {rand()}]
-            if {$u < 1e-15} {set u 1e-15}
-
-            set key [expr {
-                log(-log($u))
-                - $decay * (
-                    log($attempted + 1.0) - log($successful + 1.0)
-                )
-            }]
-
-            if {$key < $lowest_key} {
-                set lowest_key $key
-                set selected $id
-            }
-        }
-
-        #No removal can preserve the endpoints and existing topology rules
-        if {$selected == -1} {
-            return [list [array get pool] -1 -1]
-        }
-
-        set recipients [list $pool($selected.parent)]
-        set fractions {1.0}
+        return [list [array get pool] -1 -1]
     }
 
-    #Transfer counters for every CV; choose origin replacement
-    set largest_fraction -1.0
-
-    foreach recipient $recipients fraction $fractions {
-        if {$fraction > $largest_fraction} {
-            set largest_fraction $fraction
-            set replacement $recipient
-        }
-
-        foreach cv $cv_names {
-            foreach counter {seed_attempted seed_successful} {
-                set pool($recipient.${counter}_$cv) [expr { $pool($recipient.${counter}_$cv) + $fraction * $pool($selected.${counter}_$cv) }]
-            }
+    #Reconnect every child, including when removing a branching node
+    set parent $pool($selected.parent)
+    foreach id $ids {
+        if {$pool($id.parent) == $selected} {
+            set pool($id.parent) $parent
         }
     }
 
-    #Reconnect children
-    foreach child $children($selected) {
-        set pool($child.parent) $pool($selected.parent)
-    }
-
-    #Delete known node properties; replica origins remain untouched
+    #Discard the removed state's counters without transferring history
     unset pool($selected.parent)
 
     foreach cv $cv_names {
@@ -1054,10 +1029,10 @@ proc swarm_pool_drop {pool_data seed_cv cv_names decay} {
         unset pool($selected.seed_successful_$cv)
     }
 
-    #Remove ID from surviving-node list
     set index [lsearch -exact $pool(nodes) $selected]
     set pool(nodes) [lreplace $pool(nodes) $index $index]
 
+    #Caller redirects affected replica origins to the nearest CV neighbor
     return [list [array get pool] $selected $replacement]
 }
 #####################################################
@@ -1715,49 +1690,29 @@ while {$i_run < $num_runs} {
                 
                     set seed_ids    [SArray::keys   scores]
                     set seed_scores [SArray::values scores]
-                
-                    #Track replicas and injected nodes for gobal improvements
+
+                    #Count one attempt per evaluated replica
                     foreach key $seed_ids value $seed_scores {
                         set origin_node $swarm_pool($key.origin)
 
-                        #Increase attempts counter (every cycle is an attempt)
                         if {$origin_node == 0} {continue}
-                        set swarm_pool($origin_node.seed_attempted_$seed_cv) [expr { $swarm_pool($origin_node.seed_attempted_$seed_cv) + 1.0 }]
 
-                        #global improvement? register successful pool seeding with stronger weight propotional to stagnation and the improvment made
-                        if {$swarm_pool(best_$seed_cv) eq "False"} {continue}
-                        if {[eval swarm_opt_$seed_opt $value $swarm_pool(best_$seed_cv)]} {
-                            set swarm_pool($origin_node.seed_successful_$seed_cv) [expr { $swarm_pool($origin_node.seed_successful_$seed_cv) + ([eval swarm_weight_$seed_opt $value $swarm_pool(best_$seed_cv)] / $swarm(seed_prob_${seed_cv})) }]
-                        }
+                        set swarm_pool($origin_node.seed_attempted_$seed_cv) [expr { $swarm_pool($origin_node.seed_attempted_$seed_cv) + 1.0 }]
                     }
-                    
-                    #Update global best (needed cause multi-CV resets can loose it from SWARM)
-                    foreach value [SArray::values scores] {
-                        if {$swarm_pool(best_$seed_cv) eq "False" || [eval swarm_opt_$seed_opt $value $swarm_pool(best_$seed_cv)]} {
-                            set swarm_pool(best_$seed_cv) $value
-                        }
-                    }
-                
-                    #Add new nodes to graphed pool for all local improvements
-                    #Check each replica's current score vs. the score of its origin node
+
+                    #Add new nodes for all local improvements
                     foreach key $seed_ids value $seed_scores {
-                    
-                        set origin_node   $swarm_pool($key.origin)
-                        set origin_score  $swarm_pool($origin_node.score_$seed_cv)
-                        
+
+                        set origin_node  $swarm_pool($key.origin)
+                        set origin_score $swarm_pool($origin_node.score_$seed_cv)
+
                         #Is better than origin node or is the root node?
                         if {$origin_node == 0 || [eval swarm_opt_$seed_opt $value $origin_score]} {
 
-                            #count the local success weighted by the improvement made but not for root node
-                            if {$origin_node != 0} {
-                                set swarm_pool($origin_node.seed_successful_$seed_cv) [expr { $swarm_pool($origin_node.seed_successful_$seed_cv) + [eval swarm_weight_$seed_opt $value $origin_score] }]
-                            }
-                            
-                            #add new node due to local improvement
                             set node_id $swarm_pool(next_node)
                             set swarm_pool($node_id.parent) $origin_node
 
-                            #Add score to all CVs and initialize counters
+                            #Store scores for all CVs and initialize counters
                             set i 0
                             foreach iterate_seed_cv [array names swarm_colvars] {
                                 set swarm_pool($node_id.score_$iterate_seed_cv) [lindex [lindex $replica_scores_collected $key] $i]
@@ -1765,20 +1720,41 @@ while {$i_run < $num_runs} {
                                 set swarm_pool($node_id.seed_successful_$iterate_seed_cv) 0
                                 incr i
                             }
-                            
-                            #copy files into pool
-                            file copy -force [format "$output_root.offer.$key.coor" ""] "$pool_output_root/$node_id.coor"
-                            file copy -force [format "$output_root.offer.$key.vel"  ""] "$pool_output_root/$node_id.vel" 
-                            file copy -force [format "$output_root.offer.$key.xsc"  ""] "$pool_output_root/$node_id.xsc"
+
+                            #Split only the newly earned reward between origin and child
+                            if {$origin_node != 0} {
+                                set reward [eval swarm_weight_$seed_opt $value $origin_score]
+
+                                #Global bonus relative to the best score before this cycle
+                                if {$swarm_pool(best_$seed_cv) ne "False" && [eval swarm_opt_$seed_opt $value $swarm_pool(best_$seed_cv)]} {
+                                    set reward [expr { $reward + [eval swarm_weight_$seed_opt $value $swarm_pool(best_$seed_cv)] / $swarm(seed_prob_${seed_cv}) }]
+                                }
                                 
+                                #Amplify reward using inverse of decay
+                                set reward [expr {pow($reward, 1.0 / $swarmpooldecay)}]
+
+                                array set swarm_pool [swarm_pool_share [array get swarm_pool] $origin_node $node_id $seed_cv 1.0 $reward]
+                            }
+
+                            #Copy files into pool
+                            file copy -force [format "$output_root.offer.$key.coor" ""] "$pool_output_root/$node_id.coor"
+                            file copy -force [format "$output_root.offer.$key.vel" ""] "$pool_output_root/$node_id.vel"
+                            file copy -force [format "$output_root.offer.$key.xsc" ""] "$pool_output_root/$node_id.xsc"
+
                             puts "Info: SWARM - $seed_caption - POOL NODE $node_id WITH PARENT $origin_node ADDED - REPLICA $key WITH SCORE $value"
-                            
-                            #Update replicas origin to continue lineage from here
+
+                            #Continue the replica's lineage from the new node
                             set swarm_pool($key.origin) $node_id
-                            
-                            #increase node counters
+
                             lappend swarm_pool(nodes) $node_id
-                            incr    swarm_pool(next_node)
+                            incr swarm_pool(next_node)
+                        }
+                    }
+
+                    #Update global best after all rewards use the same previous record
+                    foreach value $seed_scores {
+                        if {$swarm_pool(best_$seed_cv) eq "False" || [eval swarm_opt_$seed_opt $value $swarm_pool(best_$seed_cv)]} {
+                            set swarm_pool(best_$seed_cv) $value
                         }
                     }
 
@@ -1823,7 +1799,7 @@ while {$i_run < $num_runs} {
 
                             set weight 0.0
                             if {$node_id != 0} {
-                                set weight [expr { pow(($successful + 1.0) / ($attempted + 1.0), $swarmpooldecay) }]
+                                set weight [expr { ($successful + 1.0) / pow($attempted + 1.0, $swarmpooldecay) }]
                             }
 
                             puts stderr [format "%-12s %8d %10d %10d %20s %12.6g %12.6g %12.6g %14.8g" \
