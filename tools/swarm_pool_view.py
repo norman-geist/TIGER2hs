@@ -257,10 +257,10 @@ TEMPLATE = r'''<!doctype html>
 <div class="display-grid">
 <label class="display-field"><span>CV</span><select id="cv"></select></label>
 <label class="display-field"><span>Best score</span><select id="direction"><option value="min">Lower is better</option><option value="max">Higher is better</option></select></label>
-<label class="display-field"><span>Graph view</span><select id="graph-view"><option value="width">Fit width</option><option value="screen">Fit screen</option></select></label>
-<label class="display-field"><span>Node color</span><select id="color"><option value="id">Node ID</option><option value="score">CV score</option></select></label>
-<label class="display-field"><span>Node size</span><select id="size"><option value="weight">Weight</option><option value="probability">Draw probability</option><option value="uniform">Uniform</option></select></label>
-<label class="display-field"><span>Edge width</span><select id="edges"><option value="uniform">Uniform</option><option value="weight">Endpoint weight</option></select></label>
+<label class="display-field"><span>Graph view</span><select id="graph-view"><option value="width">Fit width</option><option value="screen" selected>Fit screen</option></select></label>
+<label class="display-field"><span>Node color</span><select id="color"><option value="id">Node ID</option><option value="score" selected>CV score</option></select></label>
+<label class="display-field"><span>Node size</span><select id="size" title="Weighted radii: 5–36 px, square-root scale relative to the per-CV maximum across the log"><option value="weight" selected>Weight</option><option value="probability">Draw probability</option><option value="uniform">Uniform</option></select></label>
+<label class="display-field"><span>Edge width</span><select id="edges"><option value="uniform">Uniform</option><option value="weight" selected>Child weight</option></select></label>
 </div>
 </div>
 </section>
@@ -321,7 +321,7 @@ const spreadViews=new Map(),spreadGeometry=new Map();
 let spreadDrag=null,spreadClickBlockedUntil=0;
 const topologyHistory=[],replicaHistories=Object.create(null),spreadCaches=Object.create(null);
 let selected=null,timer=null,lastCv=null,trendCacheKey=null;
-const cvDirections={...report.directions},scoreRanges=Object.create(null),histories=Object.create(null);
+const cvDirections={...report.directions},scoreRanges=Object.create(null),weightMaxima=Object.create(null),probabilityMaxima=Object.create(null),histories=Object.create(null);
 for(const cv of report.cvs){histories[cv]=[];replicaHistories[cv]=[]}
 //Compute score ranges and pool extrema once; redraws inspect only current nodes.
 for(let i=0;i<data.length;i++){
@@ -329,6 +329,7 @@ const s=data[i],extrema=Object.create(null),real=s.nodes.filter(n=>n.id),childre
 for(const n of real)if(children.has(n.parent)&&n.parent!==n.id)children.set(n.parent,children.get(n.parent)+1);
 topologyHistory.push({nodes:real.length,tips:real.filter(n=>children.get(n.id)===0).length,branches:real.filter(n=>children.get(n.id)>1).length});
 for(const n of s.nodes){if(!n.id)continue;for(const [cv,row] of Object.entries(n.cvs)){
+if(Number.isFinite(row.weight))weightMaxima[cv]=Math.max(weightMaxima[cv]||0,row.weight);
 const range=scoreRanges[cv]||(scoreRanges[cv]={min:Infinity,max:-Infinity});
 range.min=Math.min(range.min,row.score);range.max=Math.max(range.max,row.score);
 const pair=extrema[cv]||(extrema[cv]={min:Infinity,max:-Infinity,values:[]});
@@ -341,6 +342,7 @@ const values=extrema[cv]?.values||[];values.sort((a,b)=>a-b);
 const count=values.length,middle=Math.floor(count/2),median=count?(count%2?values[middle]:values[middle-1]/2+values[middle]/2):null;
 const complete=real.length>0&&real.every(n=>n.cvs[cv]&&n.cvs[cv].weight!==null),total=complete?real.reduce((sum,n)=>sum+n.cvs[cv].weight,0):0;
 const probabilities=complete&&total>0?Object.fromEntries(real.map(n=>[n.id,n.cvs[cv].weight/total])):null;
+if(probabilities)for(const probability of Object.values(probabilities))probabilityMaxima[cv]=Math.max(probabilityMaxima[cv]||0,probability);
 const batch=s.replicas?.[cv],replicas=Object.entries(batch?.scores||{}).map(([id,score])=>({id:Number(id),score})).sort((a,b)=>a.score-b.score||a.id-b.id);
 const rc=replicas.length,rm=Math.floor(rc/2);
 replicaHistories[cv].push({index:i,x:s.cycle??i+1,min:rc?replicas[0].score:null,max:rc?replicas[rc-1].score:null,median:rc?(rc%2?replicas[rm].score:replicas[rm-1].score/2+replicas[rm].score/2):null,count:rc,replicas,run:s.run??batch?.run,s,poolMin:extrema[cv]?.min??null,poolMax:extrema[cv]?.max??null});
@@ -413,8 +415,12 @@ for(const n of nodes)n.x=65+n.depth*(width-140)/depth;
 const radius=n=>{
 if(!n.id)return 10;if(sizeSelect.value==='uniform'||!n.row)return 14;
 const w=n.row.weight;if(w===null)return 14;
-const v=sizeSelect.value==='probability'?(total>0?w/total:0)*nodes.length:w;
-return Math.min(27,Math.sqrt(130+170*Math.max(0,v)));
+const probabilityMode=sizeSelect.value==='probability';
+if(probabilityMode&&!(total>0))return 14;
+const value=probabilityMode?w/total:w,maximum=probabilityMode?probabilityMaxima[cv]:weightMaxima[cv];
+//Fixed per-CV scale across the log, matching the weighted edge scaling.
+const relative=maximum>0?Math.max(0,Math.min(1,value/maximum)):0;
+return 5+31*Math.sqrt(relative);
 };
 const before=new Map([...graphNodes].map(([id,n])=>[id,{x:n.x,y:n.y,r:n.r,opacity:n.opacity}]));
 for(const entry of graphNodes.values())entry.active=false;
@@ -454,9 +460,11 @@ if(!entry.active){entry.target={...entry.from,opacity:0};entry.g.setAttribute('t
 for(const edge of graphEdges.values())edge.active=false;
 for(const n of nodes){
 const p=map.get(n.parent);if(!p||p===n)continue;
-const weighted=edgeSelect.value==='weight'&&p.id!==0&&p.row&&n.row&&p.row.weight!==null&&n.row.weight!==null;
-const strength=weighted?Math.min(p.row.weight,n.row.weight):null;
-const thickness=weighted?1+4*Math.sqrt(strength/(1+strength)):1.5;
+const weighted=edgeSelect.value==='weight'&&n.row&&n.row.weight!==null;
+const strength=weighted?n.row.weight:null;
+//Use a fixed per-CV scale across all snapshots, without saturation at large weights.
+const relativeWeight=weighted&&weightMaxima[cv]>0?Math.max(0,Math.min(1,strength/weightMaxima[cv])):0;
+const thickness=weighted?0.75+7.25*Math.sqrt(relativeWeight):1.5;
 let edge=graphEdges.get(n.id);
 if(!edge){
 const line=el('line',{stroke:'var(--muted)','stroke-linecap':'butt','marker-end':'url(#arrow)'});line.append(el('title'));edgeLayer.append(line);
@@ -468,7 +476,7 @@ edge.reconnect=edge.parent!==n.parent||(animate&&edge.reconnect);
 edge.fromAttach=edge.attach?{...edge.attach}:null;
 edge.parent=n.parent;edge.active=true;
 edge.line.setAttribute('data-parent',p.id);edge.line.setAttribute('data-child',n.id);
-edge.line.querySelector('title').textContent=weighted?`Node ${p.id} → ${n.id}; smaller endpoint weight ${fmt(strength)}`:`Node ${p.id} → ${n.id}; uniform width`;
+edge.line.querySelector('title').textContent=weighted?`Node ${p.id} → ${n.id}; child weight ${fmt(strength)}`:`Node ${p.id} → ${n.id}; uniform width`;
 }
 for(const edge of graphEdges.values())if(!edge.active){
 edge.fromWidth=edge.width;edge.targetWidth=edge.width;edge.fromOpacity=edge.opacity;edge.targetOpacity=0;edge.reconnect=false;
@@ -735,7 +743,7 @@ appendCycleMarker(layer,points,x,m,height);
 }
 function draw(){if(exportRunning&&!exportStepping)return;alignPlayback();const i=snapshotIndex,s=data[i],cv=activeCv(s);if(cv!==lastCv){direction.value=cvDirections[cv]||'min';lastCv=cv}
 byId('color-legend').textContent=colorSelect.value==='id'?'Color identifies node ID; neighboring IDs use contrasting hues':'Darker fill = better score on a fixed scale per CV';
-byId('edge-legend').textContent=edgeSelect.value==='weight'?'Thicker edges = both endpoints more strongly weighted (compressed scale); root edges uniform':'Edges have uniform width';
+byId('edge-legend').textContent=edgeSelect.value==='weight'?'Edge width = child weight (square-root scale, 0.75–8 px; fixed per CV across the log)':'Edges have uniform width';
 const sequence=playbackIndices(),position=sequence.indexOf(i);slider.max=Math.max(0,sequence.length-1);slider.value=Math.max(0,position);
 byId('position').textContent=`${position+1} / ${sequence.length}`;byId('prev').disabled=position<=0;byId('next').disabled=position>=sequence.length-1;byId('play').disabled=sequence.length<2;
 byId('status').textContent=`${s.source?s.source+' · ':''}Cycle ${s.cycle} · TIGER2 run ${s.run??'unknown'} · CV ${cv||'unknown'} · Active CV ${s.active||'unknown'} · ${s.nodes.filter(n=>n.id).length} real nodes`;

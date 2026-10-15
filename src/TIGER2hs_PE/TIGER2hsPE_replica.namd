@@ -904,75 +904,91 @@ proc swarm_pool_pick {pool_data seed_cv decay} {
     return [lindex $ids [rselect [llength $ids]]]
 }
 
+#Remove the lowest-cost non-root node.
+#Cost: active-CV spacing loss * (1 + largest N*draw_probability across CVs).
+#Protect one representative of both endpoints of every CV. No counter inheritance.
+#Return: updated pool, removed node ID, replacement replica-origin ID.
 proc swarm_pool_drop {pool_data seed_cv cv_names decay} {
     array set pool $pool_data
 
-    #Collect physical nodes
     set ids {}
     foreach id $pool(nodes) {
-        if {$id == 0} {continue}
-        lappend ids $id
-        set protected($id) 0
+        if {$id != 0} {lappend ids $id}
     }
-
-    if {![llength $ids]} {
+    set count [llength $ids]
+    if {$count < 2} {
         return [list [array get pool] -1 -1]
     }
 
-    #Protect one representative of both endpoints for every CV
+    foreach id $ids {
+        set protected($id) 0
+        set importance($id) 0.0
+    }
+
+    #Protect one representative of both endpoints for every CV.
+    #Also calculate each node's largest N*p across all CVs.
     foreach cv $cv_names {
         set min_id [lindex $ids 0]
         set max_id $min_id
         set minimum $pool($min_id.score_$cv)
         set maximum $minimum
+        set total 0.0
 
         foreach id $ids {
             set score $pool($id.score_$cv)
-
             if {$score < $minimum} {
                 set minimum $score
                 set min_id $id
             }
-
             if {$score > $maximum} {
                 set maximum $score
                 set max_id $id
+            }
+
+            set attempted $pool($id.seed_attempted_$cv)
+            set successful $pool($id.seed_successful_$cv)
+            set weights($id) [expr {($successful + 1.0) / pow($attempted + 1.0, $decay)}]
+            set total [expr {$total + $weights($id)}]
+            if {$cv eq $seed_cv} {
+                set active_weight($id) $weights($id)
             }
         }
 
         set protected($min_id) 1
         set protected($max_id) 1
+
+        foreach id $ids {
+            #N*p is 1 for uniform weights. Match the picker's uniform fallback.
+            set relative [expr {$total > 0.0 ? $count * ($weights($id) / $total) : 1.0}]
+            if {$relative > $importance($id)} {
+                set importance($id) $relative
+            }
+        }
     }
 
-    #Sort physical nodes by their active CV score
+    #CV neighbors define spacing loss; tips and internal nodes compete equally.
     set ordered {}
     foreach id $ids {
         lappend ordered [list $pool($id.score_$seed_cv) $id]
     }
     set ordered [lsort -real -index 0 $ordered]
-
-    #Find the least costly removal, independent of graph topology
     set selected -1
     set replacement -1
     set lowest_cost Inf
     set lowest_weight Inf
-    set count [llength $ordered]
 
     for {set i 0} {$i < $count} {incr i} {
         lassign [lindex $ordered $i] score id
-
         if {$protected($id)} {continue}
 
         set lower -1
         set upper -1
         set left Inf
         set right Inf
-
         if {$i > 0} {
             lassign [lindex $ordered [expr {$i - 1}]] lower_score lower
             set left [expr {abs($score - $lower_score)}]
         }
-
         if {$i < $count - 1} {
             lassign [lindex $ordered [expr {$i + 1}]] upper_score upper
             set right [expr {abs($upper_score - $score)}]
@@ -982,7 +998,7 @@ proc swarm_pool_drop {pool_data seed_cv cv_names decay} {
             set cost [expr {2.0 * $left * $right}]
             set candidate_replacement [expr {$left <= $right ? $lower : $upper}]
         } elseif {$lower != -1} {
-            #An unprotected boundary node duplicates a protected endpoint
+            #An unprotected boundary node duplicates a protected endpoint.
             set cost [expr {$left * $left}]
             set candidate_replacement $lower
         } elseif {$upper != -1} {
@@ -992,13 +1008,12 @@ proc swarm_pool_drop {pool_data seed_cv cv_names decay} {
             continue
         }
 
-        set attempted $pool($id.seed_attempted_$seed_cv)
-        set successful $pool($id.seed_successful_$seed_cv)
-        set weight [expr {
-            ($successful + 1.0) / pow($attempted + 1.0, $decay)
-        }]
+        #Make strongly preferred nodes more expensive to remove.
+        #Use the strongest preference across CVs, not only the active CV.
+        set cost [expr {$cost * (1.0 + $importance($id))}]
+        set weight $active_weight($id)
 
-        #Preserve coverage first; prefer lower weight when costs are equal
+        #Retain the active-CV weight tie-breaker for equal adjusted costs.
         if {$selected == -1 || $cost < $lowest_cost || ($cost == $lowest_cost && $weight < $lowest_weight)} {
             set selected $id
             set replacement $candidate_replacement
@@ -1007,12 +1022,11 @@ proc swarm_pool_drop {pool_data seed_cv cv_names decay} {
         }
     }
 
-    #All surviving physical nodes are protected
     if {$selected == -1} {
         return [list [array get pool] -1 -1]
     }
 
-    #Reconnect every child, including when removing a branching node
+    #Reconnect children to the removed node's parent; preserve an acyclic graph.
     set parent $pool($selected.parent)
     foreach id $ids {
         if {$pool($id.parent) == $selected} {
@@ -1020,19 +1034,16 @@ proc swarm_pool_drop {pool_data seed_cv cv_names decay} {
         }
     }
 
-    #Discard the removed state's counters without transferring history
+    #Counters are discarded, not inherited. Caller remaps replica origins.
     unset pool($selected.parent)
-
     foreach cv $cv_names {
         unset pool($selected.score_$cv)
         unset pool($selected.seed_attempted_$cv)
         unset pool($selected.seed_successful_$cv)
     }
-
     set index [lsearch -exact $pool(nodes) $selected]
     set pool(nodes) [lreplace $pool(nodes) $index $index]
 
-    #Caller redirects affected replica origins to the nearest CV neighbor
     return [list [array get pool] $selected $replacement]
 }
 #####################################################
