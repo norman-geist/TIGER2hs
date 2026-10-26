@@ -1131,10 +1131,12 @@ if {[info exists swarmcycle] && $swarmcycle > 0} {
     if {$swarmpoolsize > 0} {    
         set pool_output_root "swarm-pool"
         if {![file exists $pool_output_root] && $replica_id == 0} {
-            puts "Info: SWARM - SETTING UP GRAPHED STRUCTURE POOL (decay $swarmpooldecay)"
+            puts "Info: SWARM - SETTING UP GRAPHED STRUCTURE POOL"
             puts "Info: SWARM - POOL SEEDING PROPORTIONAL TO STAGNATION"
             puts "Info: SWARM - LOCAL  SUCCESS ACCOUNTING WITH IMPROVEMENT-WEIGHTING"
             puts "Info: SWARM - GLOBAL SUCCESS ACCOUNTING WITH IMPROVEMENT-WEIGHTING PROPORTIONAL TO STAGNATION"
+            puts "Info: SWARM - REWARD DECAY EXPONENT $swarmpooldecay"
+            puts "Info: SWARM - REWARD AMPLIFICATION FACTOR $swarmpoolgain"
             file mkdir $pool_output_root
         } else {
             puts "Warn: SWARM - USING EXISTING STRUCTURE POOL - BE CAUTIOUS"
@@ -1741,8 +1743,8 @@ while {$i_run < $num_runs} {
                                     set reward [expr { $reward + [eval swarm_weight_$seed_opt $value $swarm_pool(best_$seed_cv)] / $swarm(seed_prob_${seed_cv}) }]
                                 }
                                 
-                                #Amplify reward using inverse of decay
-                                set reward [expr {pow($reward, 1.0 / $swarmpooldecay)}]
+                                #Amplify reward using gain factor
+                                set reward [expr {1. * $reward * $swarmpoolgain}]
 
                                 array set swarm_pool [swarm_pool_share [array get swarm_pool] $origin_node $node_id $seed_cv 1.0 $reward]
                             }
