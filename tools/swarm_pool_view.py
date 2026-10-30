@@ -239,14 +239,14 @@ TEMPLATE = r'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SWARM pool — __TITLE__</title>
 <style>
-:root {color-scheme:light dark;--bg:#f8fafc;--fg:#17212e;--panel:#fff;--line:#cbd5e1;--muted:#536173;--series:#176b9b;--other:#bb6127;--tip:#8c3455;--highlight:#e6f2fb}
-@media(prefers-color-scheme:dark){:root{--bg:#111820;--fg:#e4eaf2;--panel:#1c2632;--line:#495667;--muted:#aebaca;--series:#6bb9e5;--other:#efaa70;--tip:#ef91b6;--highlight:#263f52}}
+:root {color-scheme:light dark;--bg:#f8fafc;--fg:#17212e;--panel:#fff;--line:#cbd5e1;--muted:#536173;--series:#176b9b;--other:#bb6127;--replica:#087f6d;--tip:#8c3455;--highlight:#e6f2fb}
+@media(prefers-color-scheme:dark){:root{--bg:#111820;--fg:#e4eaf2;--panel:#1c2632;--line:#495667;--muted:#aebaca;--series:#6bb9e5;--other:#efaa70;--replica:#5ee0bd;--tip:#ef91b6;--highlight:#263f52}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}main{max-width:1250px;margin:auto;padding:24px}h1{font-size:24px;margin:0 0 8px}h2{font-size:18px;margin:24px 0 10px}.muted{color:var(--muted)}button,select{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:6px 10px}button{cursor:pointer}button:disabled{opacity:.45;cursor:default}button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--series);outline-offset:3px}.controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px 0}.controls label{display:flex;align-items:center;gap:7px}input[type=range]{flex:1;min-width:130px;accent-color:var(--series)}input[type=number]{appearance:textfield;-moz-appearance:textfield}input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}#status{font-variant-numeric:tabular-nums}#graph-wrap{border:1px solid var(--line);margin-top:12px;background:var(--panel)}#graph{display:block;width:100%}svg text{fill:var(--fg);font:12px system-ui,sans-serif}#selected{padding:10px 0;min-height:42px;font-variant-numeric:tabular-nums}.legend{display:flex;flex-wrap:wrap;gap:16px;font-size:13px;color:var(--muted)}.legend .one{color:var(--series)}.legend .two{color:var(--other)}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{text-align:right;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}th:first-child,td:first-child{text-align:left}tbody tr{cursor:pointer}tbody tr:hover,tbody tr.selected{background:var(--highlight)}#trend,#spread,#replica-spread,#tracked-probability,#frontier-probability,#topology{width:100%;display:block}details{margin-top:18px}#warnings{overflow-wrap:anywhere;padding-left:22px}.node{cursor:pointer}.node:focus{outline:none}.node:focus-visible text{font-weight:700}#tracked-panel{position:fixed;right:16px;bottom:16px;z-index:5;padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 3px 16px #0002;max-width:260px;max-height:45vh;overflow:auto}#tracked-panel[hidden]{display:none}#tracked-panel strong{display:block}.tracked-item{display:flex;gap:8px;align-items:center}.tracked-item input{width:30px;height:26px;padding:0;border:0;background:none}.tracked-list{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}.tracked-list button{border-color:#dc2626}.tracked-list button.absent{opacity:.6}#snapshot-label{min-width:120px}.empty{fill:var(--muted)}@media(max-width:600px){main{padding:14px}h1{font-size:21px}.controls{gap:8px}#status{font-size:14px}}
 
 .plot-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0;font-size:12px}.plot-controls button{min-width:34px}.zoom-plot{touch-action:none;cursor:crosshair;user-select:none}.zoom-plot:focus-visible{outline:2px solid var(--series);outline-offset:3px}
-.viewer-controls{display:grid;gap:12px;margin:22px 0 16px}.toolbar-panel{padding:16px 18px;background:var(--panel);border:1px solid var(--line);border-radius:10px}.toolbar-heading{font-size:12px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:12px}.playback-row{display:flex;align-items:center;gap:20px;flex-wrap:wrap}.button-group{display:flex;gap:6px;align-items:center}.viewer-controls button{min-height:38px}.viewer-controls #play{min-width:76px;background:var(--series);border-color:var(--series);color:var(--panel);font-weight:600}.delay-control{display:flex;gap:8px;align-items:center}.delay-control label{font-size:13px;color:var(--muted);white-space:nowrap}.delay-control input{width:76px;height:38px;text-align:center;font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:5px}.delay-control button{width:34px;padding:6px}.motion-control{display:flex;align-items:center;gap:7px;font-size:14px;white-space:nowrap}.motion-control input{accent-color:var(--series)}#render-gif{margin-left:auto}.timeline-row{display:flex;align-items:center;gap:18px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}.timeline-row #snapshot-label{display:flex;gap:8px;align-items:center;font-size:13px;min-width:145px;color:var(--muted)}#position{font-variant-numeric:tabular-nums;color:var(--fg);font-weight:600}.timeline-row #cycle{width:100%;min-width:0;margin:0}.display-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px}.display-field{display:flex;flex-direction:column;gap:6px;min-width:0}.display-field>span{font-size:13px;color:var(--muted)}.display-field select{width:100%;min-width:0;height:38px}.tracking-row{display:flex;align-items:center;gap:18px;justify-content:space-between}.tracking-row p{margin:0;font-size:13px;color:var(--muted)}.tracking-row button{white-space:nowrap}#status{font-size:13px;color:var(--muted);padding:0 2px}#export-status:empty{display:none}#export-status{margin-top:6px}
+.viewer-controls{display:grid;gap:12px;margin:22px 0 16px}.toolbar-panel{padding:16px 18px;background:var(--panel);border:1px solid var(--line);border-radius:10px}.toolbar-heading{font-size:12px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:12px}.playback-row{display:flex;align-items:center;gap:20px;flex-wrap:wrap}.button-group{display:flex;gap:6px;align-items:center}.viewer-controls button{min-height:38px}.viewer-controls #play{min-width:76px;background:var(--series);border-color:var(--series);color:var(--panel);font-weight:600}.delay-control{display:flex;gap:8px;align-items:center}.delay-control label{font-size:13px;color:var(--muted);white-space:nowrap}.delay-control input{width:76px;height:38px;text-align:center;font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:5px}.delay-control button{width:34px;padding:6px}.motion-control{display:flex;align-items:center;gap:7px;font-size:14px;white-space:nowrap}.motion-control input{accent-color:var(--series)}.gif-controls{display:flex;align-items:center;gap:8px}.gif-controls label{font-size:13px;color:var(--muted);white-space:nowrap}.gif-controls select{height:38px}.timeline-row{display:flex;align-items:center;gap:18px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}.timeline-row #snapshot-label{display:flex;gap:8px;align-items:center;font-size:13px;min-width:145px;color:var(--muted)}#position{font-variant-numeric:tabular-nums;color:var(--fg);font-weight:600}.timeline-row #cycle{width:100%;min-width:0;margin:0}.display-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px}.display-field{display:flex;flex-direction:column;gap:6px;min-width:0}.display-field>span{font-size:13px;color:var(--muted)}.display-field select{width:100%;min-width:0;height:38px}.tracking-row{display:flex;align-items:center;gap:18px;justify-content:space-between}.tracking-row p{margin:0;font-size:13px;color:var(--muted)}.tracking-row button{white-space:nowrap}#status{font-size:13px;color:var(--muted);padding:0 2px}#export-status:empty{display:none}#export-status{margin-top:6px}
 @media(max-width:1050px){.display-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.playback-row{gap:12px}}
-@media(max-width:600px){.toolbar-panel{padding:14px}.display-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.playback-row{gap:12px 16px}#render-gif{margin-left:0}.timeline-row{flex-direction:column;align-items:stretch;gap:10px}.timeline-row #snapshot-label{justify-content:space-between}.tracking-row{flex-wrap:wrap;gap:10px}.viewer-controls{margin-top:18px}}
+@media(max-width:600px){.toolbar-panel{padding:14px}.display-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.playback-row{gap:12px 16px}.timeline-row{flex-direction:column;align-items:stretch;gap:10px}.timeline-row #snapshot-label{justify-content:space-between}.tracking-row{flex-wrap:wrap;gap:10px}.viewer-controls{margin-top:18px}}
 
 .playback-sticky{position:sticky;top:8px;z-index:4;margin-top:0}.playback-sticky .toolbar-panel{box-shadow:0 4px 16px #0002}
 </style></head><body><main>
@@ -269,9 +269,11 @@ TEMPLATE = r'''<!doctype html>
 <div class="toolbar-heading">Playback</div>
 <div class="playback-row">
 <div class="button-group" role="group" aria-label="Playback navigation"><button id="prev" type="button">Previous</button><button id="play" type="button">Play</button><button id="next" type="button">Next</button></div>
+<div class="gif-controls" role="group" aria-label="GIF export"><label for="gif-resolution" title="Maximum graph dimension in exported pixels. Larger values preserve labels in large pools; smaller graphs keep their native size. Higher resolution takes longer to render and produces larger files.">GIF</label><select id="gif-resolution"><option value="1200" selected>1200 px max</option><option value="2400">2400 px max</option><option value="3600">3600 px max</option><option value="4800">4800 px max</option></select>
+<button id="render-gif" type="button">Render GIF</button></div>
 <div class="delay-control"><label for="delay">Delay (s)</label><div class="button-group"><button id="delay-down" type="button" aria-label="Decrease playback delay">−</button><input id="delay" type="number" required min="0.05" max="60" step="any" value="0.9"><button id="delay-up" type="button" aria-label="Increase playback delay">+</button></div></div>
 <label class="motion-control"><input id="motion" type="checkbox" checked> Smooth motion</label>
-<button id="render-gif" type="button">Render GIF</button>
+
 </div>
 <div class="timeline-row"><label for="cycle" id="snapshot-label">Snapshot <span id="position"></span></label><input type="range" id="cycle" min="0" value="0" aria-label="Snapshot"></div>
 </div>
@@ -290,8 +292,9 @@ TEMPLATE = r'''<!doctype html>
 <div class="legend"><span class="two">Shaded band: minimum–maximum</span><span class="one">━ Median</span><span>Virtual root excluded; gaps indicate unreported CV scores</span></div>
 <svg id="spread" role="img" aria-label="Retained pool CV range and median over CV cycles"></svg>
 <h2>Replica CV spread</h2>
+<div class="controls"><label>Histogram bins <input id="replica-bins" type="number" required min="1" max="100" step="1" value="8" style="width:70px"></label><label title="Gaussian smoothing width in bins; 0 shows raw counts. Smoothing preserves the total replica count.">Smoothing (σ bins) <input id="replica-smoothing" type="number" required min="0" max="5" step="0.25" value="1" style="width:70px"></label><span class="muted">Current snapshot · fixed bins per CV · shares the CV axis and zoom</span></div>
 <div id="replica-spread-summary" aria-live="polite"></div>
-<div class="legend"><span class="two">Shaded band: replica minimum–maximum</span><span class="one">━ Replica median</span><span style="color:#8b5cf6">┄ Best retained in pool</span></div>
+<div class="legend"><span style="color:var(--replica)">● Replica scores</span><span class="two">Shaded band: replica minimum–maximum</span><span class="one">━ Replica median</span><span style="color:#8b5cf6">┄ Best retained in pool</span></div>
 <svg id="replica-spread" role="img" aria-label="Replica CV scores, range and median compared with the pool frontier over CV cycles"></svg>
 <h2>Best score over CV cycles</h2><div class="legend"><span class="one">━ Recorded swarming best</span><span class="two">━ Best retained in pool</span></div>
 <svg id="trend" role="img" aria-label="Best scores over CV cycles"></svg>
@@ -617,13 +620,13 @@ byId('frontier-width').addEventListener('change',()=>{const input=byId('frontier
 function drawSpread(cv,replicas=false){
 const plotId=replicas?'replica-spread':'spread',svg=byId(plotId),points=(replicas?replicaHistories:histories)[cv]||[],p=points.find(p=>p.index===snapshotIndex);
 byId(plotId+'-summary').textContent=p&&p.count?`${cv} · Minimum ${fmt(p.min)} · Maximum ${fmt(p.max)} · Range ${fmt(p.max-p.min)} · Median ${fmt(p.median)} · ${p.count} scored ${replicas?'replicas · Run '+(p.run??'unknown'):'nodes'}`:`${cv||'Selected CV'} · ${replicas?'No replica offers':'No retained scores'} reported in this snapshot`;
-const width=Math.max(300,svg.clientWidth),height=265,m={left:66,right:24,top:22,bottom:52};
+const width=Math.max(420,svg.clientWidth),height=265,m={left:66,right:replicas?170:24,top:22,bottom:52};
 const viewKey=JSON.stringify([plotId,cv]),view=spreadViews.get(viewKey);
 const fullX=cycleDomain(points),xDomain=view?.x||fullX,x=v=>m.left+(v-xDomain[0])/(xDomain[1]-xDomain[0])*(width-m.left-m.right);
 byId(plotId).classList.add('zoom-plot');
 document.querySelector(`[data-reset-plot="${plotId}"]`).disabled=!view;
 const key=JSON.stringify([cv,width,replicas?direction.value:null,view]),current=svg.querySelector('[data-current-snapshot]');
-if(spreadCaches[plotId]===key&&current){updateCycleMarker(current,points,x);return}
+if(spreadCaches[plotId]===key&&current){updateCycleMarker(current,points,x);if(replicas)drawReplicaHistogram(svg,points,p);return}
 spreadCaches[plotId]=key;spreadGeometry.delete(plotId);syncPlotControls(plotId);svg.replaceChildren();svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
 let lo=Infinity,hi=-Infinity;for(const p of points)if(p.count){lo=Math.min(lo,p.min);hi=Math.max(hi,p.max)}
 if(!Number.isFinite(lo)){svg.append(el('text',{x:width/2,y:80,'text-anchor':'middle'},replicas?'No replica offers available for this CV':'No retained scores available for this CV'));return}
@@ -651,12 +654,60 @@ for(const p of points)if(p.count){
 const g=el('g',{role:'button',tabindex:0,'aria-label':`Cycle ${p.s.cycle}, minimum ${p.min}, maximum ${p.max}, median ${p.median}`});
 g.append(el('line',{x1:x(p.x),x2:x(p.x),y1:y(p.min),y2:y(p.max),stroke:'var(--other)','stroke-width':2}));
 g.append(el('circle',{cx:x(p.x),cy:y(p.median),r:10,fill:'transparent'}));g.append(el('circle',{cx:x(p.x),cy:y(p.median),r:3,fill:'var(--series)'}));
-if(replicas)for(const r of p.replicas){const dot=el('circle',{cx:x(p.x),cy:y(r.score),r:3,fill:'var(--other)','fill-opacity':.65,'data-replica-id':r.id});dot.append(el('title',{},`Replica ${r.id}; run ${p.run}; ${cv}: ${fmt(r.score)}`));g.append(dot)}
+if(replicas)for(const r of p.replicas){const dot=el('circle',{cx:x(p.x),cy:y(r.score),r:3,fill:'var(--replica)','fill-opacity':.85,'data-replica-id':r.id});dot.append(el('title',{},`Replica ${r.id}; run ${p.run}; ${cv}: ${fmt(r.score)}`));g.append(dot)}
 g.append(el('title',{},`Snapshot ${p.index+1}; cycle ${p.s.cycle}; TIGER2 run ${p.s.run??'unknown'}; ${cv}: minimum ${fmt(p.min)}, maximum ${fmt(p.max)}, median ${fmt(p.median)}; ${p.count} ${replicas?'replicas':'nodes'}`));
 const choose=()=>{if(exportRunning||performance.now()<spreadClickBlockedUntil)return;stop();snapshotIndex=p.index;draw()};g.addEventListener('click',choose);g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose()}});layer.append(g);
 }
 appendCycleMarker(layer,points,x,m,height);
+if(replicas)drawReplicaHistogram(svg,points,p);
 }
+
+function replicaHistogram(points,current,bins){
+let low=Infinity,high=-Infinity,maxCount=1;
+for(const p of points)if(p.count){low=Math.min(low,p.min);high=Math.max(high,p.max);maxCount=Math.max(maxCount,p.count)}
+if(!Number.isFinite(low))return null;
+if(low===high){const pad=Math.max(1,Math.abs(low)*.05);low-=pad;high+=pad}
+const step=(high-low)/bins,counts=Array(bins).fill(0);
+for(const r of current?.replicas||[])counts[Math.max(0,Math.min(bins-1,Math.floor((r.score-low)/step)))]++;
+return {low,high,step,counts,maxCount};
+}
+function smoothHistogram(counts,sigma){
+if(!(sigma>0))return counts.slice();
+const result=Array(counts.length).fill(0);
+//Normalize each source bin's kernel at the boundaries to preserve total count.
+for(let i=0;i<counts.length;i++){
+if(!counts[i])continue;
+const kernel=counts.map((_,j)=>Math.exp(-.5*Math.pow((j-i)/sigma,2)));
+const total=kernel.reduce((a,b)=>a+b,0);
+for(let j=0;j<counts.length;j++)result[j]+=counts[i]*kernel[j]/total;
+}
+return result;
+}
+function drawReplicaHistogram(svg,points,current){
+svg.querySelector('[data-replica-histogram]')?.remove();
+const geometry=spreadGeometry.get('replica-spread');if(!geometry)return;
+const input=byId('replica-bins'),bins=input.checkValidity()?Number(input.value):8;
+const histogram=replicaHistogram(points,current,bins);if(!histogram)return;
+const smoothingInput=byId('replica-smoothing'),sigma=smoothingInput.checkValidity()?Number(smoothingInput.value):0,displayCounts=smoothHistogram(histogram.counts,sigma);
+const {width,height,m,y:domain}=geometry,left=width-m.right+32,right=width-12,top=m.top,bottom=height-m.bottom;
+const y=v=>bottom-(v-domain[0])/(domain[1]-domain[0])*(bottom-top);
+const group=el('g',{'data-replica-histogram':''});svg.append(group);
+group.append(el('text',{x:(left+right)/2,y:13,'text-anchor':'middle'},'Current swarm'));
+group.append(el('rect',{x:left,y:top,width:right-left,height:bottom-top,fill:'none',stroke:'var(--line)'}));
+for(let i=0;i<bins;i++){
+const lower=histogram.low+i*histogram.step,upper=lower+histogram.step,count=displayCounts[i],raw=histogram.counts[i];
+const a=Math.max(top,y(upper)),b=Math.min(bottom,y(lower));if(b<=a||!count)continue;
+const bar=el('rect',{x:left,y:a,width:(right-left)*count/histogram.maxCount,height:Math.max(.5,b-a-1),fill:'var(--replica)','fill-opacity':.8});
+bar.append(el('title',{},`${fmt(lower)} – ${fmt(upper)}: ${raw} replica${raw===1?'':'s'}${sigma>0?`; smoothed count ${fmt(count)}`:''}`));group.append(bar);
+}
+for(const count of [0,histogram.maxCount])group.append(el('text',{x:left+(right-left)*count/histogram.maxCount,y:bottom+18,'text-anchor':count?'end':'start'},String(count)));
+group.append(el('text',{x:(left+right)/2,y:height-8,'text-anchor':'middle'},sigma>0?'Smoothed count':'Replica count'));
+if(!current?.count)group.append(el('text',{x:(left+right)/2,y:(top+bottom)/2,'text-anchor':'middle'},'No offers'));
+}
+for(const id of ['replica-bins','replica-smoothing'])byId(id).addEventListener('change',()=>{
+const input=byId(id);if(!input.checkValidity()){input.reportValidity();return}
+drawSpread(activeCv(data[snapshotIndex]),true);
+});
 
 //Zoom in data coordinates so labels, line widths and replica dots remain legible.
 function limitSpreadDomain(domain,full){
@@ -838,7 +889,8 @@ depth=Math.max(depth,steps);
 const leaves=Math.max(1,[...children.values()].filter(n=>n===0).length);
 width=Math.max(width,Math.max(1,depth)*160+140);height=Math.max(height,leaves*88+40);
 }
-const scale=Math.min(1,1200/Math.max(width,height));
+const maxDimension=Number(byId('gif-resolution').value);
+const scale=Math.min(1,maxDimension/Math.max(width,height));
 return {width,height,pixelsWide:Math.max(1,Math.round(width*scale)),pixelsHigh:Math.max(1,Math.round(height*scale))};
 }
 async function gifPixels(canvas,context,bounds){
@@ -880,7 +932,7 @@ async function capture(hold){if(exportAbort)return;const pixels=await gifPixels(
 if(!context)throw new Error('Canvas rendering is unavailable in this browser.');
 if(document.fonts&&document.fonts.ready)await document.fonts.ready;
 for(let i=0;i<frameIndices.length&&!exportAbort;i++){
-status.textContent=`Rendering GIF: snapshot ${i+1} / ${frameIndices.length} · ${frames} frames`;
+status.textContent=`Rendering GIF: snapshot ${i+1} / ${frameIndices.length} · ${frames} frames · ${canvas.width} × ${canvas.height} pixels`;
 //The first snapshot appears immediately, with no transition from the viewer.
 motionInput.checked=i===0?false:savedMotion;step(frameIndices[i]);
 const transition=graphTransition;
