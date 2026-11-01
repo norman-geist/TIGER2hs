@@ -54,7 +54,7 @@ def parse_log(lines):
             "line": line, "cycle": None, "run": context.get("run"),
             "cv_id": context.get("cv_id"), "active": None, "nodes": {},
             "records": dict(records), "offers": offers,
-            "source": source,
+            "source": source, "origins": {},
         }
         if pending_meta:
             current["cycle"] = pending_meta.get("cycle")
@@ -132,6 +132,22 @@ def parse_log(lines):
                 batch["scores"][replica_id] = value
             except (ValueError, IndexError):
                 warn(line_no, "invalid replica offer")
+        elif tag == "SWARM_ORIGIN":
+            try:
+                if len(parts) != 4:
+                    raise ValueError("expected cycle, replica ID and origin node")
+                cycle, replica, origin = map(int, parts[1:])
+                if current is None or current["cycle"] != cycle:
+                    raise ValueError("no matching preceding pool snapshot")
+                if replica < 0 or origin < 0:
+                    raise ValueError("negative replica or origin ID")
+                if origin not in current["nodes"]:
+                    raise ValueError("origin node absent from pool snapshot")
+                if replica in current["origins"]:
+                    warn(line_no, "duplicate replica origin; using last record")
+                current["origins"][replica] = origin
+            except (ValueError, IndexError) as exc:
+                warn(line_no, "invalid SWARM_ORIGIN row ({})".format(exc))
         elif tag == "SWARM_POOL":
             if len(parts) > 1 and parts[1] == "Cycle":
                 finish()
@@ -239,8 +255,8 @@ TEMPLATE = r'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SWARM pool — __TITLE__</title>
 <style>
-:root {color-scheme:light dark;--bg:#f8fafc;--fg:#17212e;--panel:#fff;--line:#cbd5e1;--muted:#536173;--series:#176b9b;--other:#bb6127;--replica:#087f6d;--tip:#8c3455;--highlight:#e6f2fb}
-@media(prefers-color-scheme:dark){:root{--bg:#111820;--fg:#e4eaf2;--panel:#1c2632;--line:#495667;--muted:#aebaca;--series:#6bb9e5;--other:#efaa70;--replica:#5ee0bd;--tip:#ef91b6;--highlight:#263f52}}
+:root {color-scheme:light dark;--bg:#f8fafc;--fg:#17212e;--panel:#fff;--line:#cbd5e1;--muted:#536173;--series:#176b9b;--other:#bb6127;--replica:#df6658;--tip:#8c3455;--highlight:#e6f2fb}
+@media(prefers-color-scheme:dark){:root{--bg:#111820;--fg:#e4eaf2;--panel:#1c2632;--line:#495667;--muted:#aebaca;--series:#6bb9e5;--other:#efaa70;--replica:#ff9285;--tip:#ef91b6;--highlight:#263f52}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}main{max-width:1250px;margin:auto;padding:24px}h1{font-size:24px;margin:0 0 8px}h2{font-size:18px;margin:24px 0 10px}.muted{color:var(--muted)}button,select{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:6px 10px}button{cursor:pointer}button:disabled{opacity:.45;cursor:default}button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--series);outline-offset:3px}.controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px 0}.controls label{display:flex;align-items:center;gap:7px}input[type=range]{flex:1;min-width:130px;accent-color:var(--series)}input[type=number]{appearance:textfield;-moz-appearance:textfield}input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}#status{font-variant-numeric:tabular-nums}#graph-wrap{border:1px solid var(--line);margin-top:12px;background:var(--panel)}#graph{display:block;width:100%}svg text{fill:var(--fg);font:12px system-ui,sans-serif}#selected{padding:10px 0;min-height:42px;font-variant-numeric:tabular-nums}.legend{display:flex;flex-wrap:wrap;gap:16px;font-size:13px;color:var(--muted)}.legend .one{color:var(--series)}.legend .two{color:var(--other)}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{text-align:right;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}th:first-child,td:first-child{text-align:left}tbody tr{cursor:pointer}tbody tr:hover,tbody tr.selected{background:var(--highlight)}#trend,#spread,#replica-spread,#tracked-probability,#frontier-probability,#topology{width:100%;display:block}details{margin-top:18px}#warnings{overflow-wrap:anywhere;padding-left:22px}.node{cursor:pointer}.node:focus{outline:none}.node:focus-visible text{font-weight:700}#tracked-panel{position:fixed;right:16px;bottom:16px;z-index:5;padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 3px 16px #0002;max-width:260px;max-height:45vh;overflow:auto}#tracked-panel[hidden]{display:none}#tracked-panel strong{display:block}.tracked-item{display:flex;gap:8px;align-items:center}.tracked-item input{width:30px;height:26px;padding:0;border:0;background:none}.tracked-list{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}.tracked-list button{border-color:#dc2626}.tracked-list button.absent{opacity:.6}#snapshot-label{min-width:120px}.empty{fill:var(--muted)}@media(max-width:600px){main{padding:14px}h1{font-size:21px}.controls{gap:8px}#status{font-size:14px}}
 
 .plot-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0;font-size:12px}.plot-controls button{min-width:34px}.zoom-plot{touch-action:none;cursor:crosshair;user-select:none}.zoom-plot:focus-visible{outline:2px solid var(--series);outline-offset:3px}
@@ -272,7 +288,7 @@ TEMPLATE = r'''<!doctype html>
 <div class="gif-controls" role="group" aria-label="GIF export"><label for="gif-resolution" title="Maximum graph dimension in exported pixels. Larger values preserve labels in large pools; smaller graphs keep their native size. Higher resolution takes longer to render and produces larger files.">GIF</label><select id="gif-resolution"><option value="1200" selected>1200 px max</option><option value="2400">2400 px max</option><option value="3600">3600 px max</option><option value="4800">4800 px max</option></select>
 <button id="render-gif" type="button">Render GIF</button></div>
 <div class="delay-control"><label for="delay">Delay (s)</label><div class="button-group"><button id="delay-down" type="button" aria-label="Decrease playback delay">−</button><input id="delay" type="number" required min="0.05" max="60" step="any" value="0.9"><button id="delay-up" type="button" aria-label="Increase playback delay">+</button></div></div>
-<label class="motion-control"><input id="motion" type="checkbox" checked> Smooth motion</label>
+<div class="button-group"><label class="motion-control"><input id="motion" type="checkbox" checked> Smooth motion</label><label class="motion-control"><input id="replica-dots" type="checkbox" checked> Replicas</label><select id="replica-style" aria-label="Replica display style" title="One halo per node; halo area grows with replica occupancy. Grouped pulses follow graph paths between recorded assignments."><option value="dots">Dots</option><option value="density" selected>Occupancy halos</option></select></div>
 
 </div>
 <div class="timeline-row"><label for="cycle" id="snapshot-label">Snapshot <span id="position"></span></label><input type="range" id="cycle" min="0" value="0" aria-label="Snapshot"></div>
@@ -280,6 +296,7 @@ TEMPLATE = r'''<!doctype html>
 
 </section>
 <div id="status" aria-live="polite"></div><div id="export-status" role="status" aria-live="polite" class="muted"></div>
+<div id="replica-origin-status" class="muted" aria-live="polite" style="font-size:13px"></div>
 <div id="graph-wrap"><svg id="graph" role="img" aria-label="Pool parent-child graph"></svg></div>
 <div class="legend"><span id="color-legend">Color identifies node ID; neighboring IDs use contrasting hues</span><span>Arrow = parent → child</span><span id="edge-legend">Edges have uniform width</span><span>Root 0 is virtual</span></div>
 
@@ -292,7 +309,7 @@ TEMPLATE = r'''<!doctype html>
 <div class="legend"><span class="two">Shaded band: minimum–maximum</span><span class="one">━ Median</span><span>Virtual root excluded; gaps indicate unreported CV scores</span></div>
 <svg id="spread" role="img" aria-label="Retained pool CV range and median over CV cycles"></svg>
 <h2>Replica CV spread</h2>
-<div class="controls"><label>Histogram bins <input id="replica-bins" type="number" required min="1" max="100" step="1" value="8" style="width:70px"></label><label title="Gaussian smoothing width in bins; 0 shows raw counts. Smoothing preserves the total replica count.">Smoothing (σ bins) <input id="replica-smoothing" type="number" required min="0" max="5" step="0.25" value="1" style="width:70px"></label><span class="muted">Current snapshot · fixed bins per CV · shares the CV axis and zoom</span></div>
+<div class="controls"><label>Histogram bins <input id="replica-bins" type="number" required min="1" max="100" step="1" value="8" style="width:70px"></label><label title="Gaussian smoothing width in bins; 0 shows raw counts. Smoothing uses actual replica scores, respects the pool frontier, and preserves total count. Genuine offers beyond the frontier remain visible.">Smoothing (σ bins) <input id="replica-smoothing" type="number" required min="0" max="5" step="0.25" value="1" style="width:70px"></label><span class="muted">Current snapshot · fixed bins per CV · shares the CV axis and zoom</span></div>
 <div id="replica-spread-summary" aria-live="polite"></div>
 <div class="legend"><span style="color:var(--replica)">● Replica scores</span><span class="two">Shaded band: replica minimum–maximum</span><span class="one">━ Replica median</span><span style="color:#8b5cf6">┄ Best retained in pool</span></div>
 <svg id="replica-spread" role="img" aria-label="Replica CV scores, range and median compared with the pool frontier over CV cycles"></svg>
@@ -384,20 +401,37 @@ if(!movePlayback(1)||snapshotIndex===playbackIndices().slice(-1)[0])stop();
 function selectNode(id){if(exportRunning)return;selected=id;if(trackedNodes.has(id))trackedNodes.delete(id);else{trackedNodes.add(id);if(!trackedColors.has(id))trackedColors.set(id,trackPalette[(trackedColors.size)%trackPalette.length])}draw()}
 byId('clear-tracked').addEventListener('click',()=>{if(exportRunning)return;trackedNodes.clear();selected=null;draw()});
 byId('graph-view').addEventListener('change',draw);
-const graphNodes=new Map(),graphEdges=new Map();
+byId('replica-dots').addEventListener('change',draw);
+byId('replica-style').addEventListener('change',draw);
+const graphNodes=new Map(),graphEdges=new Map(),graphReplicas=new Map();
 let graphFrame=null,graphSnapshot=null,graphSize=null,graphTransition=null;
 let exportRunning=false,exportAbort=false,exportStepping=false;
 const reducedMotion=window.matchMedia?window.matchMedia('(prefers-reduced-motion: reduce)'):null;
 const motionInput=byId('motion');
+function replicaRoute(start,end,parents){
+const adjacent=new Map();
+for(const [id,parent] of parents){if(!adjacent.has(id))adjacent.set(id,[]);if(parent!==id&&parents.has(parent)){adjacent.get(id).push(parent);if(!adjacent.has(parent))adjacent.set(parent,[]);adjacent.get(parent).push(id)}}
+const queue=[start],previous=new Map([[start,null]]);
+for(let i=0;i<queue.length;i++){const id=queue[i];if(id===end){const path=[];for(let n=end;n!==null;n=previous.get(n))path.push(n);return path.reverse()}for(const next of adjacent.get(id)||[])if(!previous.has(next)){previous.set(next,id);queue.push(next)}}
+return [];
+}
+function pointOnReplicaRoute(points,t){
+const lengths=points.slice(1).map((p,i)=>Math.hypot(p.x-points[i].x,p.y-points[i].y));
+let remaining=t*lengths.reduce((a,b)=>a+b,0);
+for(let i=0;i<lengths.length;i++){if(remaining<=lengths[i]&&lengths[i]>0){const f=remaining/lengths[i];return {x:points[i].x+(points[i+1].x-points[i].x)*f,y:points[i].y+(points[i+1].y-points[i].y)*f}}remaining-=lengths[i]}
+return points[points.length-1];
+}
 function drawGraph(s,cv,total){
 const svg=byId('graph'),snapshot=snapshotIndex;
+//Complete an interrupted density transfer before constructing another assignment transition.
+if(graphFrame!==null&&graphTransition?.density){cancelAnimationFrame(graphFrame);graphTransition.finish()}
 const animate=graphSnapshot!==null&&motionInput.checked&&!(reducedMotion&&reducedMotion.matches)&&(snapshot!==graphSnapshot||graphFrame!==null);
 if(graphFrame!==null){cancelAnimationFrame(graphFrame);graphFrame=null}
 if(!svg.querySelector('[data-node-layer]')){
 svg.replaceChildren();svg.append(el('title'));
 const defs=el('defs'),marker=el('marker',{id:'arrow',viewBox:'0 -3 6 6',refX:0,markerWidth:4,markerHeight:4,markerUnits:'strokeWidth',orient:'auto'});
-marker.append(el('path',{d:'M0,-3L6,0L0,3',fill:'var(--muted)'}));defs.append(marker);svg.append(defs);
-svg.append(el('g',{'data-edge-layer':''}),el('g',{'data-node-layer':''}));
+marker.append(el('path',{d:'M0,-3L6,0L0,3',fill:'var(--muted)'}));defs.append(marker);const densityFilter=el('filter',{id:'replica-density-blur',x:'-50%',y:'-50%',width:'200%',height:'200%','color-interpolation-filters':'sRGB'});densityFilter.append(el('feGaussianBlur',{stdDeviation:7}));defs.append(densityFilter);svg.append(defs);
+svg.append(el('g',{'data-edge-layer':''}),el('g',{'data-halo-layer':'','pointer-events':'none'}),el('g',{'data-flow-layer':'','pointer-events':'none'}),el('g',{'data-node-layer':''}),el('g',{'data-replica-layer':''}));
 }
 const edgeLayer=svg.querySelector('[data-edge-layer]'),nodeLayer=svg.querySelector('[data-node-layer]');
 const nodes=s.nodes.map(n=>({...n,children:[],row:n.cvs[cv]})),map=new Map(nodes.map(n=>[n.id,n]));
@@ -442,7 +476,9 @@ g.append(el('circle'),el('text',{'text-anchor':'middle'}),el('text',{'text-ancho
 g.addEventListener('click',()=>selectNode(n.id));
 g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectNode(n.id)}});
 nodeLayer.append(g);
-entry={g,x:start.x,y:start.y,r:radius(n),opacity:animate?0:1};graphNodes.set(n.id,entry);
+const halo=el('circle',{fill:'var(--replica)',filter:'url(#replica-density-blur)','data-replica-halo':n.id,opacity:0});
+svg.querySelector('[data-halo-layer]').append(halo);
+entry={halo,haloCount:0,g,x:start.x,y:start.y,r:radius(n),opacity:animate?0:1};graphNodes.set(n.id,entry);
 }
 entry.active=true;entry.node=n;entry.target={x:n.x,y:n.y,r:radius(n),opacity:1};
 entry.g.setAttribute('tabindex','0');entry.g.removeAttribute('aria-hidden');
@@ -484,12 +520,83 @@ edge.line.querySelector('title').textContent=weighted?`Node ${p.id} → ${n.id};
 for(const edge of graphEdges.values())if(!edge.active){
 edge.fromWidth=edge.width;edge.targetWidth=edge.width;edge.fromOpacity=edge.opacity;edge.targetOpacity=0;edge.reconnect=false;
 }
+//Origin records describe assignments for the upcoming sampling cycle, not MD trajectories.
+const showReplicas=byId('replica-dots').checked,origins=Object.entries(s.origins||{}).map(([id,origin])=>({id:Number(id),origin})).filter(r=>map.has(r.origin)).sort((a,b)=>a.id-b.id);
+const replicaLayer=svg.querySelector('[data-replica-layer]'),groups=new Map(),density=byId('replica-style').value==='density';
+byId('replica-origin-status').textContent=origins.length?`${origins.length} recorded assignments · ${density?'halo area shows occupancy; grouped pulses follow graph routes':'dots identify replicas; motion follows graph routes'} · not physical trajectories`:'Replica origins unavailable in this snapshot';
+replicaLayer.style.display=density?'none':'';
+svg.querySelector('[data-halo-layer]').style.display=showReplicas&&density?'':'none';
+for(const entry of graphReplicas.values())entry.active=false;
+if(showReplicas)for(const r of origins){if(!groups.has(r.origin))groups.set(r.origin,[]);groups.get(r.origin).push(r)}
+//Keep interpolated counts on node entries so interrupted playback resumes smoothly.
+for(const [id,entry] of graphNodes){
+entry.fromHaloCount=entry.haloCount;
+entry.targetHaloCount=groups.get(id)?.length||0;
+}
+const flowLayer=svg.querySelector('[data-flow-layer]'),flows=new Map();
+flowLayer.replaceChildren();flowLayer.style.display=showReplicas&&density?'':'none';
+const routeParents=new Map([...graphNodes].map(([id,e])=>[id,e.node.parent]));
+for(const [origin,group] of groups)group.forEach((r,i)=>{
+const n=map.get(origin),ring=Math.floor(i/8),slot=i%8,count=Math.min(8,group.length-ring*8);
+//Side arcs leave the labels above and below each node unobstructed.
+const side=slot%2,rank=Math.floor(slot/2),sideCount=Math.ceil((count-side)/2),angle=(side?Math.PI:0)+(sideCount>1?(rank/(sideCount-1)-.5)*1.6:0),distance=radius(n)+16+ring*14+3*Math.sin(r.id*2.399);
+const target={x:n.x+Math.cos(angle+.07*Math.sin(r.id*1.7))*distance,y:n.y+Math.sin(angle+.07*Math.sin(r.id*1.7))*distance};
+let entry=graphReplicas.get(r.id);
+if(!entry){const dot=el('circle',{r:6,fill:'var(--replica)',stroke:'var(--panel)','stroke-width':1,'data-replica-dot':r.id});dot.append(el('title'));const trail=el('path',{fill:'none',stroke:'var(--replica)','stroke-width':3,'stroke-linecap':'round','pointer-events':'none',opacity:0});replicaLayer.append(trail,dot);entry={dot,trail,x:target.x,y:target.y,origin};graphReplicas.set(r.id,entry)}
+
+entry.active=true;entry.from={x:entry.x,y:entry.y};entry.target=target;
+entry.moving=animate&&entry.origin!==origin;
+entry.delay=(r.id*.61803398875%1)*.24;
+entry.route=entry.moving?replicaRoute(entry.origin,origin,routeParents):[];
+entry.dot.querySelector('title').textContent=`Replica ${r.id} · origin node ${origin}${entry.origin!==origin?` · previous displayed origin ${entry.origin}`:''}`;
+if(density&&entry.moving&&entry.route.length>1){
+const key=entry.route.join('>');
+if(!flows.has(key))flows.set(key,{source:entry.origin,destination:origin,route:entry.route,count:0});
+flows.get(key).count++;
+}
+entry.origin=origin;
+});
+for(const [id,entry] of graphReplicas)if(!entry.active){entry.dot.remove();entry.trail.remove();graphReplicas.delete(id)}
+//One pulse per directed route, with the same area-per-replica scale as the halos.
+for(const flow of flows.values()){
+flow.pulse=el('circle',{fill:'var(--replica)',filter:'url(#replica-density-blur)','data-replica-flow':flow.route.join('>'),opacity:0});
+flowLayer.append(flow.pulse);
+}
 const startSize=graphSize||{width,height},lerp=(a,b,t)=>a+(b-a)*t;
 function render(t){
+const haloCounts=new Map([...graphNodes].map(([id,e])=>[id,lerp(e.fromHaloCount,e.targetHaloCount,t)]));
+const smooth=v=>{v=Math.max(0,Math.min(1,v));return v*v*(3-2*v)};
+for(const flow of flows.values()){
+//Remove mass during departure and deposit it only on arrival; no double counting.
+const departed=smooth(t/.22),arrived=smooth((t-.78)/.22),mass=flow.count*(departed-arrived);
+haloCounts.set(flow.source,haloCounts.get(flow.source)+flow.count*(t-departed));
+haloCounts.set(flow.destination,haloCounts.get(flow.destination)+flow.count*(arrived-t));
+const points=flow.route.map(id=>{const n=graphNodes.get(id);return {x:lerp(n.from.x,n.target.x,t),y:lerp(n.from.y,n.target.y,t)}});
+const point=pointOnReplicaRoute(points,t);
+flow.pulse.setAttribute('cx',point.x);flow.pulse.setAttribute('cy',point.y);
+flow.pulse.setAttribute('r',20*Math.sqrt(Math.max(0,mass)));
+flow.pulse.setAttribute('opacity',.42*Math.min(1,mass));
+flow.pulse.setAttribute('visibility',mass>0?'visible':'hidden');
+}
+for(const entry of graphReplicas.values()){
+const u=entry.moving?Math.max(0,Math.min(1,(t-entry.delay)/(1-entry.delay))):t;
+const routePoints=[entry.from,...entry.route.map(id=>{const n=graphNodes.get(id);return {x:lerp(n.from.x,n.target.x,t),y:lerp(n.from.y,n.target.y,t)}}),entry.target];
+const position=v=>entry.moving&&entry.route.length?pointOnReplicaRoute(routePoints,v):entry.moving?(v<.5?entry.from:entry.target):{x:lerp(entry.from.x,entry.target.x,v),y:lerp(entry.from.y,entry.target.y,v)};
+entry.dot.setAttribute('opacity',entry.moving&&!entry.route.length?Math.abs(2*u-1):1);
+const point=position(u);entry.x=point.x;entry.y=point.y;entry.dot.setAttribute('cx',entry.x);entry.dot.setAttribute('cy',entry.y);
+const tail=[];for(let j=0;j<=6;j++){const p=position(Math.max(0,u-.16*(1-j/6)));tail.push(`${j?'L':'M'}${p.x},${p.y}`)}
+entry.trail.setAttribute('d',tail.join(''));entry.trail.setAttribute('opacity',entry.moving&&entry.route.length?.55*Math.sin(Math.PI*u):0);
+}
 graphSize={width:lerp(startSize.width,width,t),height:lerp(startSize.height,height,t)};
 svg.setAttribute('viewBox',`0 0 ${graphSize.width} ${graphSize.height}`);svg.style.width='100%';const fittedHeight=byId('graph-wrap').clientWidth*graphSize.height/graphSize.width;svg.style.height=(byId('graph-view').value==='screen'?Math.min(fittedHeight,Math.max(230,window.innerHeight*.7)):fittedHeight)+'px';svg.setAttribute('preserveAspectRatio','xMidYMin meet');
 for(const entry of graphNodes.values()){
 for(const key of ['x','y','r','opacity'])entry[key]=lerp(entry.from[key],entry.target[key],t);
+//Before blurring, the area outside the node disk is pi * 400 * occupancy.
+entry.haloCount=Math.max(0,haloCounts.get(entry.node.id));
+entry.halo.setAttribute('cx',entry.x);entry.halo.setAttribute('cy',entry.y);
+entry.halo.setAttribute('r',Math.sqrt(entry.r*entry.r+400*entry.haloCount));
+entry.halo.setAttribute('opacity',.42*Math.min(1,entry.haloCount));
+entry.halo.setAttribute('visibility',entry.haloCount>0?'visible':'hidden');
 entry.g.setAttribute('transform',`translate(${entry.x},${entry.y})`);entry.g.setAttribute('opacity',entry.opacity);
 entry.g.querySelector('circle').setAttribute('r',entry.r);
 const texts=entry.g.querySelectorAll('text');texts[0].setAttribute('y',-entry.r-7);texts[1].setAttribute('y',entry.r+17);
@@ -511,12 +618,12 @@ edge.line.setAttribute('x2',n.x-dx*endGap/len);edge.line.setAttribute('y2',n.y-d
 }
 function finish(){
 render(1);graphFrame=null;
-for(const [id,entry] of graphNodes)if(!entry.active){entry.g.remove();graphNodes.delete(id)}
+for(const [id,entry] of graphNodes)if(!entry.active){entry.g.remove();entry.halo.remove();graphNodes.delete(id)}
 for(const [id,edge] of graphEdges){if(!edge.active){edge.line.remove();graphEdges.delete(id)}else edge.reconnect=false}
 }
 graphSnapshot=snapshot;
 const seconds=Number(delayInput.value),duration=Math.min(500,700*(Number.isFinite(seconds)&&seconds>0?seconds:0.9));
-graphTransition={render,finish,duration};
+graphTransition={render,finish,duration,density};
 if(!animate){finish();return}
 if(exportRunning){render(0);return}
 const started=performance.now();render(0);
@@ -671,15 +778,17 @@ const step=(high-low)/bins,counts=Array(bins).fill(0);
 for(const r of current?.replicas||[])counts[Math.max(0,Math.min(bins-1,Math.floor((r.score-low)/step)))]++;
 return {low,high,step,counts,maxCount};
 }
-function smoothHistogram(counts,sigma){
+function smoothHistogram(counts,sigma,samples=null,allowed=null){
 if(!(sigma>0))return counts.slice();
 const result=Array(counts.length).fill(0);
-//Normalize each source bin's kernel at the boundaries to preserve total count.
-for(let i=0;i<counts.length;i++){
-if(!counts[i])continue;
-const kernel=counts.map((_,j)=>Math.exp(-.5*Math.pow((j-i)/sigma,2)));
+//Center kernels on actual scores, avoiding jumps when scores cross bin edges.
+const sources=samples?samples.map(position=>({position,mass:1})):counts.map((mass,position)=>({position,mass}));
+for(const {position,mass} of sources){
+if(!mass)continue;
+const kernel=counts.map((_,j)=>(allowed?allowed[j]:1)*Math.exp(-.5*Math.pow((j-position)/sigma,2)));
 const total=kernel.reduce((a,b)=>a+b,0);
-for(let j=0;j<counts.length;j++)result[j]+=counts[i]*kernel[j]/total;
+if(total>0)for(let j=0;j<counts.length;j++)result[j]+=mass*kernel[j]/total;
+else result[Math.max(0,Math.min(counts.length-1,Math.round(position)))]+=mass;
 }
 return result;
 }
@@ -688,7 +797,14 @@ svg.querySelector('[data-replica-histogram]')?.remove();
 const geometry=spreadGeometry.get('replica-spread');if(!geometry)return;
 const input=byId('replica-bins'),bins=input.checkValidity()?Number(input.value):8;
 const histogram=replicaHistogram(points,current,bins);if(!histogram)return;
-const smoothingInput=byId('replica-smoothing'),sigma=smoothingInput.checkValidity()?Number(smoothingInput.value):0,displayCounts=smoothHistogram(histogram.counts,sigma);
+const smoothingInput=byId('replica-smoothing'),sigma=smoothingInput.checkValidity()?Number(smoothingInput.value):0;
+const frontier=direction.value==='min'?current?.poolMin:current?.poolMax;
+//Do not hide genuine offers better than the retained pool frontier.
+const boundary=Number.isFinite(frontier)?(direction.value==='min'?Math.min(frontier,current?.min??frontier):Math.max(frontier,current?.max??frontier)):null;
+const limits=histogram.counts.map((_,i)=>{const low=histogram.low+i*histogram.step,high=low+histogram.step;return {low:boundary!==null&&direction.value==='min'?Math.max(low,boundary):low,high:boundary!==null&&direction.value==='max'?Math.min(high,boundary):high}});
+const allowed=limits.map(b=>Math.max(0,(b.high-b.low)/histogram.step));
+const samples=(current?.replicas||[]).map(r=>(r.score-histogram.low)/histogram.step-.5);
+const displayCounts=smoothHistogram(histogram.counts,sigma,samples,allowed);
 const {width,height,m,y:domain}=geometry,left=width-m.right+32,right=width-12,top=m.top,bottom=height-m.bottom;
 const y=v=>bottom-(v-domain[0])/(domain[1]-domain[0])*(bottom-top);
 const group=el('g',{'data-replica-histogram':''});svg.append(group);
@@ -696,12 +812,19 @@ group.append(el('text',{x:(left+right)/2,y:13,'text-anchor':'middle'},'Current s
 group.append(el('rect',{x:left,y:top,width:right-left,height:bottom-top,fill:'none',stroke:'var(--line)'}));
 for(let i=0;i<bins;i++){
 const lower=histogram.low+i*histogram.step,upper=lower+histogram.step,count=displayCounts[i],raw=histogram.counts[i];
-const a=Math.max(top,y(upper)),b=Math.min(bottom,y(lower));if(b<=a||!count)continue;
+const visibleLower=sigma>0?limits[i].low:lower,visibleUpper=sigma>0?limits[i].high:upper;
+const a=Math.max(top,y(visibleUpper)),b=Math.min(bottom,y(visibleLower));if(b<a||!count)continue;
 const bar=el('rect',{x:left,y:a,width:(right-left)*count/histogram.maxCount,height:Math.max(.5,b-a-1),fill:'var(--replica)','fill-opacity':.8});
 bar.append(el('title',{},`${fmt(lower)} – ${fmt(upper)}: ${raw} replica${raw===1?'':'s'}${sigma>0?`; smoothed count ${fmt(count)}`:''}`));group.append(bar);
 }
 for(const count of [0,histogram.maxCount])group.append(el('text',{x:left+(right-left)*count/histogram.maxCount,y:bottom+18,'text-anchor':count?'end':'start'},String(count)));
 group.append(el('text',{x:(left+right)/2,y:height-8,'text-anchor':'middle'},sigma>0?'Smoothed count':'Replica count'));
+if(Number.isFinite(frontier)&&frontier>=domain[0]&&frontier<=domain[1]){
+const marker=el('g',{'data-histogram-frontier':''}),yy=y(frontier);
+marker.append(el('line',{x1:left,x2:right,y1:yy,y2:yy,stroke:'#8b5cf6','stroke-width':2,'stroke-dasharray':'5 4'}));
+marker.append(el('path',{d:`M${left-6},${yy-4}L${left},${yy}L${left-6},${yy+4}Z`,fill:'#8b5cf6'}));
+marker.append(el('title',{},`Best retained in pool: ${fmt(frontier)}`));group.append(marker);
+}
 if(!current?.count)group.append(el('text',{x:(left+right)/2,y:(top+bottom)/2,'text-anchor':'middle'},'No offers'));
 }
 for(const id of ['replica-bins','replica-smoothing'])byId(id).addEventListener('change',()=>{
